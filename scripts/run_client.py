@@ -45,8 +45,13 @@ def step1_kemtls_handshake(server_lt_pk):
     # Simulate server hello (in real scenario, this comes from network)
     print("   Creating server hello...")
     server = KEMTLSHandshake(is_server=True)
-    kem = KyberKEM()
-    server_lt_sk, _ = kem.generate_keypair()  # In real scenario, server loads this
+    
+    # Load actual server secret key for simulation
+    keys_dir = os.path.join(ROOT_DIR, "keys")
+    kyber_sk_path = os.path.join(keys_dir, "auth_server_kyber_sk.bin")
+    with open(kyber_sk_path, "rb") as f:
+        server_lt_sk = f.read()
+    
     server_hello = server.server_init_handshake(server_lt_sk, server_lt_pk)
     print(f"   ✓ Received server hello ({len(server_hello)} bytes)")
     
@@ -115,11 +120,19 @@ def step3_exchange_token(client, auth_code):
     # In real scenario, this would make HTTP request to token endpoint
     print("   [Simulated] POST to /token endpoint...")
     
+    # Load actual server Dilithium keys for simulation
+    keys_dir = os.path.join(ROOT_DIR, "keys")
+    dilithium_pk_path = os.path.join(keys_dir, "auth_server_dilithium_pk.bin")
+    dilithium_sk_path = os.path.join(keys_dir, "auth_server_dilithium_sk.bin")
+    
+    with open(dilithium_pk_path, "rb") as f:
+        issuer_pk = f.read()
+    with open(dilithium_sk_path, "rb") as f:
+        issuer_sk = f.read()
+    
     # Simulate token response
     from oidc.jwt_handler import PQJWT
     jwt = PQJWT()
-    sig = DilithiumSignature()
-    issuer_pk, issuer_sk = sig.generate_keypair()
     
     # Create ID token with PoP binding
     claims = {
@@ -134,7 +147,7 @@ def step3_exchange_token(client, auth_code):
         }
     }
     
-    id_token = jwt.create_id_token(claims, issuer_sk)
+    id_token = jwt.create_id_token(claims, issuer_sk, issuer_pk)
     access_token = "demo_access_token_" + "a" * 50
     
     print(f"   ✓ Received ID token ({len(id_token)} bytes)")
@@ -159,14 +172,14 @@ def step4_access_resource(access_token, client_eph_pk, client_eph_sk, resource_u
     from pop.server import ProofOfPossession
     pop_server = ProofOfPossession()
     challenge = pop_server.generate_challenge()
-    print(f"   ✓ Received challenge: {challenge[:30]}...")
+    print(f"   ✓ Received challenge nonce: {challenge['nonce'][:30]}...")
+    print(f"   ✓ Challenge timestamp: {challenge['timestamp']}")
     
     # Generate PoP proof
     print("\n   Generating PoP proof...")
-    proof = pop_client.generate_pop_proof(
+    proof = pop_client.create_pop_proof(
         challenge=challenge,
-        access_token=access_token,
-        client_ephemeral_pk=client_eph_pk
+        token=access_token
     )
     print(f"   ✓ Generated proof ({len(proof)} bytes)")
     
@@ -234,19 +247,25 @@ def main():
         keys_dir = os.path.join(ROOT_DIR, "keys")
         kyber_pk_path = os.path.join(keys_dir, "auth_server_kyber_pk.bin")
         
-        if os.path.exists(kyber_pk_path):
-            with open(kyber_pk_path, "rb") as f:
-                server_lt_pk = f.read()
-        else:
-            print("\n⚠️  Server public key not found. Generating temporary key...")
-            kem = KyberKEM()
-            server_lt_pk, _ = kem.generate_keypair()
+        if not os.path.exists(kyber_pk_path):
+            print("\n❌ Error: Server keys not found!")
+            print("   Please run: python scripts/generate_keys.py")
+            sys.exit(1)
+        
+        with open(kyber_pk_path, "rb") as f:
+            server_lt_pk = f.read()
+        print(f"\n✓ Loaded server public key ({len(server_lt_pk)} bytes)")
         
         # Execute workflow
-        client_keys, client_eph_pk = step1_kemtls_handshake(server_lt_pk)
+        client_keys, _ = step1_kemtls_handshake(server_lt_pk)
         
-        # Extract ephemeral secret key (in real implementation, this is stored)
-        client_eph_sk = b"demo_client_eph_sk_32bytes!!" + b"\x00" * 6
+        # Generate client ephemeral Dilithium keypair for PoP
+        # (In real implementation, this would be generated during initial setup)
+        print("\n✓ Generating client ephemeral Dilithium keypair for PoP...")
+        sig = DilithiumSignature()
+        client_eph_pk, client_eph_sk = sig.generate_keypair()
+        print(f"   • Public key:  {len(client_eph_pk)} bytes")
+        print(f"   • Secret key:  {len(client_eph_sk)} bytes")
         
         client, auth_code = step2_request_authorization(
             args.auth_server, 

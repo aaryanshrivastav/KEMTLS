@@ -8,10 +8,10 @@ Title: Post-Quantum OIDC: A Quantum-Resistant Authentication Approach
 OVERALL PERFORMANCE
 --------------------------------------------------------------------------------
 Total Authentication Time (Reference): 18.50ms
-Total Authentication Time (Ours):      2.00ms
-Difference:                             -16.50ms
-Performance Ratio:                      0.11x
-Improvement:                            +89.2%
+Total Authentication Time (Ours):      1.85ms
+Difference:                             -16.65ms
+Performance Ratio:                      0.10x
+Improvement:                            +90.0%
 
 
 CRYPTO OPERATIONS
@@ -21,10 +21,10 @@ Operation                      Reference    Ours         Improvement
 kyber_keygen                         0.45ms       0.00ms         99.8%
 kyber_encap                          0.52ms       0.00ms         99.6%
 kyber_decap                          0.48ms       0.00ms         99.8%
-dilithium_keygen                     1.20ms       0.20ms         83.5%
-dilithium_sign                       2.80ms       0.42ms         85.1%
-dilithium_verify                     1.50ms       0.11ms         92.5%
-chacha20_encrypt                     0.08ms       0.01ms         92.5%
+dilithium_keygen                     1.20ms       0.20ms         83.3%
+dilithium_sign                       2.80ms       0.45ms         83.8%
+dilithium_verify                     1.50ms       0.11ms         92.7%
+chacha20_encrypt                     0.08ms       0.01ms         91.2%
 chacha20_decrypt                     0.08ms       0.01ms         92.5%
 
 
@@ -32,10 +32,10 @@ PROTOCOL OPERATIONS
 --------------------------------------------------------------------------------
 Operation                      Reference    Ours         Improvement    
 --------------------------------------------------------------------------------
-kemtls_handshake                     8.50ms       0.48ms         94.3%
-jwt_create                           3.00ms       0.50ms         83.4%
-jwt_verify                           1.60ms       0.14ms         91.6%
-pop_generate                         2.90ms       0.49ms         83.0%
+kemtls_handshake                     8.50ms       0.56ms         93.4%
+jwt_create                           3.00ms       0.49ms         83.5%
+jwt_verify                           1.60ms       0.14ms         91.3%
+pop_generate                         2.90ms       0.51ms         82.4%
 pop_verify                           3.20ms       0.00ms         99.9%
 
 
@@ -43,9 +43,9 @@ END_TO_END OPERATIONS
 --------------------------------------------------------------------------------
 Operation                      Reference    Ours         Improvement    
 --------------------------------------------------------------------------------
-total                               18.50ms       2.00ms         89.2%
-phase1_kemtls                        8.50ms       0.81ms         90.5%
-phase2_authorization                 0.50ms       0.00ms         99.4%
-phase3_token                         3.00ms       0.52ms         82.5%
-phase4_resource                      6.50ms       0.66ms         89.8%
+total                               18.50ms       1.85ms         90.0%
+phase1_kemtls                        8.50ms       0.73ms         91.3%
+phase2_authorization                 0.50ms       0.00ms         99.6%
+phase3_token                         3.00ms       0.48ms         83.8%
+phase4_resource                      6.50ms       0.62ms         90.4%
 

@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "timestamp": "2026-02-09 03:19:28",
+    "timestamp": "2026-02-09 03:35:03",
     "iterations_kem_sig": 100,
     "iterations_aead": 1000
   },
@@ -22,10 +22,10 @@
         "iterations": 100,
         "avg_ms": 0.002,
         "min_ms": 0.002,
-        "max_ms": 0.026,
+        "max_ms": 0.027,
         "median_ms": 0.002,
         "p95_ms": 0.002,
-        "p99_ms": 0.026
+        "p99_ms": 0.027
       },
       "decapsulate": {
         "operation": "Kyber Decap",
@@ -45,32 +45,32 @@
       "keygen": {
         "operation": "Dilithium KeyGen",
         "iterations": 100,
-        "avg_ms": 0.198,
+        "avg_ms": 0.2,
         "min_ms": 0.184,
-        "max_ms": 1.014,
-        "median_ms": 0.188,
-        "p95_ms": 0.2,
-        "p99_ms": 1.014
+        "max_ms": 0.932,
+        "median_ms": 0.19,
+        "p95_ms": 0.214,
+        "p99_ms": 0.932
       },
       "sign": {
         "operation": "Dilithium Sign",
         "iterations": 100,
-        "avg_ms": 0.418,
+        "avg_ms": 0.454,
         "min_ms": 0.215,
-        "max_ms": 1.428,
-        "median_ms": 0.348,
-        "p95_ms": 0.831,
-        "p99_ms": 1.428
+        "max_ms": 1.367,
+        "median_ms": 0.393,
+        "p95_ms": 0.89,
+        "p99_ms": 1.367
       },
       "verify": {
         "operation": "Dilithium Verify",
         "iterations": 100,
-        "avg_ms": 0.112,
-        "min_ms": 0.108,
-        "max_ms": 0.166,
-        "median_ms": 0.11,
-        "p95_ms": 0.118,
-        "p99_ms": 0.166
+        "avg_ms": 0.11,
+        "min_ms": 0.107,
+        "max_ms": 0.123,
+        "median_ms": 0.109,
+        "p95_ms": 0.114,
+        "p99_ms": 0.123
       }
     }
   },
@@ -81,22 +81,22 @@
       "encrypt": {
         "operation": "ChaCha20-Poly1305 Encrypt",
         "iterations": 1000,
-        "avg_ms": 0.006,
+        "avg_ms": 0.007,
         "min_ms": 0.006,
-        "max_ms": 0.09,
+        "max_ms": 0.112,
         "median_ms": 0.006,
-        "p95_ms": 0.007,
-        "p99_ms": 0.013
+        "p95_ms": 0.008,
+        "p99_ms": 0.015
       },
       "decrypt": {
         "operation": "ChaCha20-Poly1305 Decrypt",
         "iterations": 1000,
         "avg_ms": 0.006,
         "min_ms": 0.006,
-        "max_ms": 0.018,
+        "max_ms": 0.052,
         "median_ms": 0.006,
         "p95_ms": 0.007,
-        "p99_ms": 0.008
+        "p99_ms": 0.011
       }
     }
   }
