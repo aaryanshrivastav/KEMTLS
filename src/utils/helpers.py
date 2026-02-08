@@ -20,7 +20,7 @@ import secrets
 from typing import Optional, Dict, Any
 # Fix relative import for direct execution
 try:
-    from src.utils.encoding import base64url_encode, base64url_decode
+    from utils.encoding import base64url_encode, base64url_decode
 except ImportError:
     # Fallback if run from different location
     try:

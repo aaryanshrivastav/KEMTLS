@@ -7,7 +7,7 @@ Uses ChaCha20-Poly1305 AEAD for encryption and includes replay protection via se
 
 import struct
 from typing import Optional
-from src.crypto.aead import AEADCipher
+from crypto.aead import AEADCipher
 
 
 class KEMTLSChannel:

@@ -3,10 +3,10 @@ Server-Side PoP Verification
 """
 
 import hashlib
-from src.crypto.dilithium_sig import DilithiumSignature
-from src.utils.helpers import generate_random_string, get_timestamp
-from src.utils.encoding import base64url_decode
-from src.utils.serialization import serialize_message
+from crypto.dilithium_sig import DilithiumSignature
+from utils.helpers import generate_random_string, get_timestamp
+from utils.encoding import base64url_decode
+from utils.serialization import serialize_message
 
 
 class ProofOfPossession:

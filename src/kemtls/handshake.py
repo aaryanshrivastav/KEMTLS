@@ -15,12 +15,12 @@ not by providing a signature.
 
 import hashlib
 from typing import Tuple, Dict, Any, Optional
-from src.crypto.kyber_kem import KyberKEM
-from src.crypto.dilithium_sig import DilithiumSignature
-from src.crypto.kdf import KeyDerivation
-from src.utils.encoding import base64url_encode, base64url_decode
-from src.utils.serialization import serialize_message
-from src.utils.helpers import generate_random_string
+from crypto.kyber_kem import KyberKEM
+from crypto.dilithium_sig import DilithiumSignature
+from crypto.kdf import KeyDerivation
+from utils.encoding import base64url_encode, base64url_decode
+from utils.serialization import serialize_message
+from utils.helpers import generate_random_string
 
 
 

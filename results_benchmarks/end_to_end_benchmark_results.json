@@ -1,0 +1,51 @@
+{
+  "iterations": 100,
+  "success_rate": 1.0,
+  "statistics": {
+    "phase1": {
+      "avg_ms": 0.807,
+      "min_ms": 0.642,
+      "max_ms": 1.611,
+      "median_ms": 0.723,
+      "p95_ms": 1.282,
+      "p99_ms": 1.611
+    },
+    "phase2": {
+      "avg_ms": 0.003,
+      "min_ms": 0.002,
+      "max_ms": 0.012,
+      "median_ms": 0.002,
+      "p95_ms": 0.004,
+      "p99_ms": 0.012
+    },
+    "phase3": {
+      "avg_ms": 0.524,
+      "min_ms": 0.248,
+      "max_ms": 1.996,
+      "median_ms": 0.454,
+      "p95_ms": 1.077,
+      "p99_ms": 1.996
+    },
+    "phase4": {
+      "avg_ms": 0.663,
+      "min_ms": 0.392,
+      "max_ms": 1.61,
+      "median_ms": 0.583,
+      "p95_ms": 1.287,
+      "p99_ms": 1.61
+    },
+    "total": {
+      "avg_ms": 1.999,
+      "min_ms": 1.353,
+      "max_ms": 3.905,
+      "median_ms": 1.879,
+      "p95_ms": 2.857,
+      "p99_ms": 3.905
+    }
+  },
+  "metadata": {
+    "timestamp": "2026-02-09 03:19:29",
+    "iterations": 100,
+    "type": "end-to-end"
+  }
+}

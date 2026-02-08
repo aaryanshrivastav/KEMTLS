@@ -3,9 +3,9 @@ Client-Side Proof-of-Possession
 """
 
 import hashlib
-from src.crypto.dilithium_sig import DilithiumSignature
-from src.utils.encoding import base64url_encode
-from src.utils.serialization import serialize_message
+from crypto.dilithium_sig import DilithiumSignature
+from utils.encoding import base64url_encode
+from utils.serialization import serialize_message
 
 
 class PoPClient:

@@ -44,8 +44,8 @@ class DilithiumSignature:
         if not isinstance(message, bytes):
             raise TypeError("Message must be bytes")
         try:
-            ml_dsa_65.verify(public_key, message, signature)
-            return True
+            # ml_dsa_65.verify() returns bool (True=valid, False=invalid)
+            return ml_dsa_65.verify(public_key, message, signature)
         except Exception:
             return False
     
@@ -91,15 +91,19 @@ def test_dilithium_signature():
     assert is_valid, "Valid signature should verify!"
     print("  ✓ Valid signature verified ✓✓✓")
     
-    # SKIP broken tampered test (pqcrypto binding issue)
-    print("  Skipping tampered test (pqcrypto binding limitation)")
+    # Test tampered message detection
+    print("  Testing tampered message detection...")
+    tampered = b"This is a TAMPERED message for ML-DSA-65 (Dilithium3)"
+    is_valid = sig.verify(pk, tampered, signature)
+    assert not is_valid, "Tampered signature should NOT verify!"
+    print("  ✓ Tampered message correctly rejected ✓✓✓")
     
     # Test invalid signature
     print("  Testing with invalid signature...")
     invalid_sig = b"\x00" * len(signature)
     is_valid = sig.verify(pk, message, invalid_sig)
-    print(f"  Invalid sig verification: {is_valid}")
-    print("  ✓ Invalid signature test completed")
+    assert not is_valid, "Invalid signature should NOT verify!"
+    print(f"  ✓ Invalid signature correctly rejected ✓✓✓")
     
     # Display algorithm info
     info = sig.get_algorithm_info()
@@ -107,7 +111,7 @@ def test_dilithium_signature():
     for key, value in info.items():
         print(f"    {key}: {value}")
     
-    print("\n✅ ML-DSA-65 signature test PASSED (with pqcrypto notes)")
+    print("\n✅ ML-DSA-65 signature test PASSED")
 
 
 if __name__ == "__main__":
