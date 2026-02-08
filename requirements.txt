@@ -1,0 +1,36 @@
+# Post-Quantum Cryptography
+oqs
+
+# Cryptography
+cryptography==41.0.7
+
+# Web Framework
+flask==3.0.0
+flask-cors==4.0.0
+
+# JSON Web Tokens
+pyjwt==2.8.0
+
+# Utilities
+requests==2.31.0
+python-dateutil==2.8.2
+click==8.1.7
+
+# Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-benchmark==4.0.0
+
+# Development
+black==23.12.1
+flake8==7.0.0
+mypy==1.7.1
+
+# Documentation
+sphinx==7.2.6
+sphinx-rtd-theme==2.0.0
+
+# Benchmarking
+matplotlib==3.8.2
+numpy==1.26.2
+pandas==2.1.4
