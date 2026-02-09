@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "timestamp": "2026-02-09 10:03:38",
+    "timestamp": "2026-02-09 10:09:37",
     "iterations": 50,
     "type": "protocol-level"
   },
@@ -12,11 +12,11 @@
         "operation": "KEMTLS Full Handshake",
         "iterations": 50,
         "avg_ms": 0.53,
-        "min_ms": 0.423,
-        "max_ms": 2.063,
-        "median_ms": 0.471,
-        "p95_ms": 0.859,
-        "p99_ms": 2.063
+        "min_ms": 0.428,
+        "max_ms": 2.189,
+        "median_ms": 0.484,
+        "p95_ms": 0.671,
+        "p99_ms": 2.189
       }
     }
   },
@@ -27,22 +27,22 @@
       "create_token": {
         "operation": "ID Token Creation",
         "iterations": 50,
-        "avg_ms": 0.509,
-        "min_ms": 0.235,
-        "max_ms": 2.048,
-        "median_ms": 0.418,
-        "p95_ms": 1.01,
-        "p99_ms": 2.048
+        "avg_ms": 0.519,
+        "min_ms": 0.247,
+        "max_ms": 1.657,
+        "median_ms": 0.429,
+        "p95_ms": 1.028,
+        "p99_ms": 1.657
       },
       "verify_token": {
         "operation": "ID Token Verification",
         "iterations": 50,
-        "avg_ms": 0.136,
-        "min_ms": 0.125,
-        "max_ms": 0.327,
+        "avg_ms": 0.134,
+        "min_ms": 0.124,
+        "max_ms": 0.181,
         "median_ms": 0.133,
-        "p95_ms": 0.15,
-        "p99_ms": 0.327
+        "p95_ms": 0.149,
+        "p99_ms": 0.181
       }
     }
   },
@@ -53,22 +53,22 @@
       "generate_proof": {
         "operation": "PoP Proof Generation",
         "iterations": 50,
-        "avg_ms": 0.513,
-        "min_ms": 0.237,
-        "max_ms": 1.657,
-        "median_ms": 0.495,
+        "avg_ms": 0.507,
+        "min_ms": 0.24,
+        "max_ms": 1.289,
+        "median_ms": 0.454,
         "p95_ms": 1.065,
-        "p99_ms": 1.657
+        "p99_ms": 1.289
       },
       "verify_proof": {
         "operation": "PoP Proof Verification",
         "iterations": 50,
-        "avg_ms": 0.004,
+        "avg_ms": 0.003,
         "min_ms": 0.0,
-        "max_ms": 0.199,
+        "max_ms": 0.14,
         "median_ms": 0.0,
-        "p95_ms": 0.002,
-        "p99_ms": 0.199
+        "p95_ms": 0.001,
+        "p99_ms": 0.14
       }
     }
   }

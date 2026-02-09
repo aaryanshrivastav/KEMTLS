@@ -6,7 +6,6 @@ keys/
 .vscode
 htmlcov/
 .coverage
-results_benchmarks
 
 # Node / frontend
 node_modules
