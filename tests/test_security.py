@@ -2,13 +2,10 @@ import hashlib
 import time
 from dataclasses import dataclass
 
-import pytest
-
+from crypto.ml_dsa import MLDSA65
 from oidc.auth_endpoints import AuthorizationEndpoint, InMemoryClientRegistry
 from oidc.introspection_endpoints import IntrospectionEndpoint
 from oidc.jwt_handler import PQJWT
-from crypto.ml_dsa import DilithiumSignature
-from utils.helpers import get_timestamp
 from oidc.refresh_store import RefreshTokenStore
 from oidc.token_endpoints import TokenEndpoint
 from oidc.userinfo_endpoints import UserInfoEndpoint
@@ -38,6 +35,7 @@ def _pkce_challenge(verifier: str) -> str:
 
 
 def _build_stack():
+    issuer_public_key = b"P" * MLDSA65.PUBLIC_KEY_SIZE
     registry = InMemoryClientRegistry(
         {"client123": {"redirect_uris": ["https://client.example/cb"]}}
     )
@@ -45,18 +43,18 @@ def _build_stack():
     token_endpoint = TokenEndpoint(
         issuer_url="https://issuer.example",
         issuer_sk=b"issuer-secret-key",
-        issuer_pk=b"issuer-public-key",
+        issuer_pk=issuer_public_key,
         authorization_code_store=auth.code_store,
         refresh_token_store=RefreshTokenStore(),
         signing_kid="signing-key-1",
     )
     userinfo = UserInfoEndpoint(
-        b"issuer-public-key",
+        issuer_public_key,
         issuer="https://issuer.example",
         audience="client123",
     )
     introspection = IntrospectionEndpoint(
-        b"issuer-public-key",
+        issuer_public_key,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -207,12 +205,12 @@ def test_wrong_audience_is_rejected_across_validation_surfaces(monkeypatch):
     tokens = _issue_tokens(auth, token_endpoint)
 
     wrong_audience_userinfo = UserInfoEndpoint(
-        b"issuer-public-key",
+        b"P" * MLDSA65.PUBLIC_KEY_SIZE,
         issuer="https://issuer.example",
         audience="wrong-audience",
     )
     wrong_audience_introspection = IntrospectionEndpoint(
-        b"issuer-public-key",
+        b"P" * MLDSA65.PUBLIC_KEY_SIZE,
         issuer="https://issuer.example",
         audience="wrong-audience",
     )

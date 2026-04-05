@@ -18,13 +18,6 @@ class DummySession:
     refresh_binding_id: bytes
     handshake_mode: str = "baseline"
 
-
-from oidc.authorization import AuthorizationEndpoint
-from oidc.token import TokenEndpoint
-from oidc.jwt_handler import PQJWT
-from utils.encoding import base64url_decode
-from utils.helpers import get_timestamp
-from crypto.ml_dsa import DilithiumSignature
 def _patch_signatures(monkeypatch):
     monkeypatch.setattr(
         "oidc.jwt_handler.MLDSA65.sign",

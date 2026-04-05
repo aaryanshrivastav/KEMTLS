@@ -1,64 +1,39 @@
-"""
-Authorization Server
+"""Compatibility wrapper around the new authorization server app factory."""
 
-Complete OIDC authorization server with KEMTLS support.
-"""
+from __future__ import annotations
 
-from flask import Flask, request, jsonify
-from crypto.ml_kem import KyberKEM
-from crypto.ml_dsa import DilithiumSignature
-from kemtls.session import KEMTLSSession
-from oidc.authorization import AuthorizationEndpoint
-from oidc.token import TokenEndpoint
-from oidc.discovery import DiscoveryEndpoint
+from crypto.ml_dsa import MLDSA65
+
+from .auth_server_app import create_auth_server_app
+
 
 class AuthorizationServer:
-    def __init__(self, issuer_url="http://localhost:5000"):
-        self.app = Flask(__name__)
-        self.issuer_url = issuer_url
-        
-        # Generate keys
-        kem = KyberKEM()
-        self.server_lt_pk, self.server_lt_sk = kem.generate_keypair()
-        
-        sig = DilithiumSignature()
-        self.issuer_pk, self.issuer_sk = sig.generate_keypair()
-        
-        # Initialize endpoints
-        self.auth_endpoint = AuthorizationEndpoint()
-        self.token_endpoint = TokenEndpoint(issuer_url, self.issuer_sk, self.issuer_pk)
-        self.discovery_endpoint = DiscoveryEndpoint(issuer_url)
-        
-        # Setup routes
-        self.setup_routes()
-    
-    def setup_routes(self):
-        @self.app.route('/.well-known/openid-configuration')
-        def discovery():
-            return jsonify(self.discovery_endpoint.get_configuration())
-        
-        @self.app.route('/authorize')
-        def authorize():
-            result = self.auth_endpoint.handle_authorize_request(
-                client_id=request.args.get('client_id'),
-                redirect_uri=request.args.get('redirect_uri'),
-                scope=request.args.get('scope'),
-                state=request.args.get('state'),
-                nonce=request.args.get('nonce'),
-                user_id='alice'  # Simplified auth
-            )
-            return jsonify(result)
-        
-        @self.app.route('/token', methods=['POST'])
-        def token():
-            data = request.get_json()
-            # Simplified - would validate authorization code here
-            return jsonify({'access_token': 'demo_token', 'token_type': 'Bearer'})
-    
-    def run(self, host='0.0.0.0', port=5000):
-        print(f"Authorization Server running on {self.issuer_url}")
+    def __init__(self, issuer_url: str = "http://localhost:5000", config=None, stores=None):
+        issuer_pk, issuer_sk = MLDSA65.generate_keypair()
+        merged_config = {
+            "issuer": issuer_url,
+            "issuer_public_key": issuer_pk,
+            "issuer_secret_key": issuer_sk,
+            "signing_kid": "signing-key-1",
+            "clients": {
+                "client123": {"redirect_uris": ["https://client.example/cb"]},
+            },
+            "demo_user": "alice",
+            "introspection_endpoint": f"{issuer_url.rstrip('/')}/introspect",
+        }
+        if config:
+            merged_config.update(config)
+
+        self.issuer_url = merged_config["issuer"]
+        self.issuer_pk = merged_config["issuer_public_key"]
+        self.issuer_sk = merged_config["issuer_secret_key"]
+        self.app = create_auth_server_app(merged_config, stores)
+        self.auth_endpoint = self.app.extensions["auth_endpoint"]
+        self.token_endpoint = self.app.extensions["token_endpoint"]
+        self.discovery_endpoint = self.app.extensions["discovery_endpoint"]
+
+    def run(self, host: str = "0.0.0.0", port: int = 5000):
         self.app.run(host=host, port=port)
 
-if __name__ == '__main__':
-    server = AuthorizationServer()
-    server.run()
+
+__all__ = ["AuthorizationServer"]

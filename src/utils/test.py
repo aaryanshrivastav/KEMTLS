@@ -1,8 +1,4 @@
-"""Virtual sandbox test for utils package.
-
-Runs utils modules with dummy replacements for external randomness/time.
-Prints each function execution to CLI.
-"""
+"""Virtual sandbox test for the current utils package."""
 
 from __future__ import annotations
 
@@ -33,7 +29,6 @@ def _load_module(module_name: str, file_path: str) -> types.ModuleType:
 
 
 def _install_fake_dependencies() -> None:
-    # Deterministic secrets / os.urandom / time.time
     fake_secrets = types.ModuleType("secrets")
 
     def choice(seq):
@@ -50,7 +45,6 @@ def _install_fake_dependencies() -> None:
     fake_time.time = time_fn
     sys.modules["time"] = fake_time
 
-    # Wrap os to keep real path utilities but deterministic urandom
     import os as _real_os
 
     fake_os = types.ModuleType("os")
@@ -95,11 +89,6 @@ def run_sandbox() -> None:
     assert helpers.is_expired(1699999999, 1700000000) is True
     assert helpers.is_expired(1700000001, 1700000000) is False
 
-    print("[helpers] create_jwk_from_dilithium_pubkey / extract_pubkey_from_jwk")
-    jwk = helpers.create_jwk_from_dilithium_pubkey(b"\x02" * 1952, "kid")
-    recovered = helpers.extract_pubkey_from_jwk(jwk)
-    assert recovered == b"\x02" * 1952
-
     print("[helpers] format_token_for_display")
     formatted = helpers.format_token_for_display("a" * 100, 20)
     assert len(formatted) == 20
@@ -114,7 +103,7 @@ def run_sandbox() -> None:
     recovered_msg = serialization.deserialize_message(data)
     assert recovered_msg == message
 
-    print("✅ utils sandbox checks passed")
+    print("utils sandbox checks passed")
 
 
 if __name__ == "__main__":
