@@ -10,6 +10,69 @@ import os
 import sys
 import subprocess
 
+# Curated test categories aligned with files present in tests/
+CATEGORY_TESTS = {
+    "1": {
+        "name": "Crypto + Encoding",
+        "files": [
+            "test_aead.py",
+            "test_certs.py",
+            "test_encoding.py",
+            "test_key_schedule.py",
+            "test_ml_dsa.py",
+            "test_ml_kem.py",
+            "test_serialization.py",
+        ],
+    },
+    "2": {
+        "name": "KEMTLS + Session",
+        "files": [
+            "test_handshake_baseline.py",
+            "test_handshake_pdk.py",
+            "test_pdk.py",
+            "test_record_layer.py",
+            "test_exporter.py",
+            "test_session_binding.py",
+            "test_replay_rejected_on_new_session.py",
+            "test_metadata_jwks_integrity.py",
+        ],
+    },
+    "3": {
+        "name": "OIDC + Tokens + Endpoints",
+        "files": [
+            "test_oidc.py",
+            "test_oidc_pkce.py",
+            "test_auth_endpoints.py",
+            "test_token_endpoints.py",
+            "test_userinfo_endpoints.py",
+            "test_discovery.py",
+            "test_jwks.py",
+            "test_introspection_endpoints.py",
+            "test_jwt_handler.py",
+            "test_jwt_validation.py",
+            "test_refresh_store.py",
+            "test_refresh_token_rotation.py",
+            "test_session_bound_access_tokens.py",
+        ],
+    },
+    "4": {
+        "name": "Integration + Server + Security",
+        "files": [
+            "test_client_logic.py",
+            "test_server_apps.py",
+            "test_integration.py",
+            "test_security.py",
+            "test_full_flow_baseline.py",
+            "test_full_flow_pdk.py",
+            "test_helpers.py",
+        ],
+    },
+    "5": {
+        "name": "All tests",
+        "files": None,
+    },
+}
+
 # Add src to path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -27,7 +90,7 @@ def run_tests(verbose=True, coverage=True, test_path=None):
     Args:
         verbose: Show verbose output
         coverage: Enable coverage reporting
-        test_path: Specific test file or directory (default: all tests)
+        test_path: Specific test file/dir or list of files (default: all tests)
     """
     print("=" * 70)
     print("KEMTLS POST-QUANTUM OIDC - TEST SUITE")
@@ -36,8 +99,10 @@ def run_tests(verbose=True, coverage=True, test_path=None):
     # Build pytest command
     cmd = ["pytest"]
     
-    # Add test path (default to tests directory)
-    if test_path:
+    # Add test target(s) (default to tests directory)
+    if isinstance(test_path, list):
+        cmd.extend(test_path)
+    elif test_path:
         cmd.append(test_path)
     else:
         cmd.append(TESTS_DIR)
@@ -87,32 +152,34 @@ def run_tests(verbose=True, coverage=True, test_path=None):
 def run_specific_tests():
     """Run specific test categories"""
     print("\nAvailable test categories:")
-    print("  1. Crypto tests (test_crypto.py)")
-    print("  2. KEMTLS tests (test_kemtls*.py)")
-    print("  3. OIDC tests (test_oidc.py)")
-    print("  4. PoP tests (test_pop.py)")
-    print("  5. Integration tests (test_integration.py)")
-    print("  6. Security tests (test_security.py)")
-    print("  7. All tests")
+    print("  1. Crypto + Encoding")
+    print("  2. KEMTLS + Session")
+    print("  3. OIDC + Tokens + Endpoints")
+    print("  4. Integration + Server + Security")
+    print("  5. All tests")
     
-    choice = input("\nSelect test category (1-7): ").strip()
-    
-    test_map = {
-        "1": os.path.join(TESTS_DIR, "test_crypto.py"),
-        "2": os.path.join(TESTS_DIR, "test_kemtls*.py"),
-        "3": os.path.join(TESTS_DIR, "test_oidc.py"),
-        "4": os.path.join(TESTS_DIR, "test_pop.py"),
-        "5": os.path.join(TESTS_DIR, "test_integration.py"),
-        "6": os.path.join(TESTS_DIR, "test_security.py"),
-        "7": None
-    }
-    
-    test_path = test_map.get(choice)
-    if choice == "7" or choice in test_map:
-        run_tests(test_path=test_path)
-    else:
+    choice = input("\nSelect test category (1-5): ").strip()
+
+    selected = CATEGORY_TESTS.get(choice)
+    if not selected:
         print("Invalid choice!")
         sys.exit(1)
+
+    files = selected["files"]
+    if files is None:
+        run_tests(test_path=None)
+        return
+
+    test_paths = [os.path.join(TESTS_DIR, filename) for filename in files]
+    missing = [path for path in test_paths if not os.path.exists(path)]
+    if missing:
+        print("\n✗ Category contains missing test files:")
+        for path in missing:
+            print(f"  - {path}")
+        sys.exit(1)
+
+    print(f"\nSelected category: {selected['name']}")
+    run_tests(test_path=test_paths)
 
 
 def main():
