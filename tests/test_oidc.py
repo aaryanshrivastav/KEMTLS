@@ -19,14 +19,12 @@ class DummySession:
     handshake_mode: str = "baseline"
 
 
-<<<<<<< Updated upstream
 from oidc.authorization import AuthorizationEndpoint
 from oidc.token import TokenEndpoint
 from oidc.jwt_handler import PQJWT
 from utils.encoding import base64url_decode
 from utils.helpers import get_timestamp
 from crypto.ml_dsa import DilithiumSignature
-=======
 def _patch_signatures(monkeypatch):
     monkeypatch.setattr(
         "oidc.jwt_handler.MLDSA65.sign",
@@ -36,7 +34,6 @@ def _patch_signatures(monkeypatch):
         "oidc.jwt_handler.MLDSA65.verify",
         lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
     )
->>>>>>> Stashed changes
 
 
 def _pkce_challenge(verifier: str) -> str:

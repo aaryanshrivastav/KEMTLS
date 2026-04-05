@@ -8,11 +8,16 @@ if SRC_DIR not in sys.path:
 
 from kemtls.session import KEMTLSSession
 
-session = KEMTLSSession(is_server=False)
+session = KEMTLSSession(
+    session_id="sess-1",
+    peer_identity="server-1",
+    handshake_mode="baseline",
+)
 
-try:
-    session.establish_channel()
-    raise AssertionError
-except RuntimeError:
-    pass
-print("✓ KEMTLS session test passed")
+assert session.session_id == "sess-1"
+assert session.peer_identity == "server-1"
+assert session.handshake_mode == "baseline"
+assert session.client_write_key is None
+assert session.server_write_key is None
+
+print("✓ KEMTLS session data model test passed")

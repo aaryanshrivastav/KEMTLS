@@ -1,124 +1,205 @@
 """
-OIDC Client Implementation
+Post-Quantum OIDC Client using KEMTLS
 
-Client for performing OpenID Connect authentication flows.
+Implements the Authorization Code Flow with PKCE (Proof Key for Code Exchange)
+over KEMTLS infrastructure. Supports access/refresh token management and 
+telemetry collection.
 """
 
-from typing import Dict, Any, Optional
-from oidc.jwt_handler import PQJWT
-from pop.client import PoPClient
+import hashlib
+import base64
+import time
+from typing import Dict, Any, Optional, List
+from client.kemtls_http_client import KEMTLSHttpClient
 from utils.helpers import generate_random_string
 
 
 class OIDCClient:
     """
-    OpenID Connect Client
-    
-    Manages the client side of the OIDC authentication flow.
+    OIDC client implementation using KEMTLS.
     """
     
     def __init__(
         self,
+        http_client: KEMTLSHttpClient,
         client_id: str,
-        redirect_uri: str,
-        auth_server_url: str,
-        client_ephemeral_sk: bytes
+        issuer_url: str,
+        redirect_uri: str
     ):
         """
-        Initialize OIDC client.
+        Initialize the OIDC client.
         
         Args:
+            http_client: KEMTLS-capable HTTP client
             client_id: Client identifier
-            redirect_uri: Redirect URI for authorization responses
-            auth_server_url: Authorization server base URL
-            client_ephemeral_sk: Client's ephemeral secret key (from KEMTLS)
+            issuer_url: OIDC issuer base URL
+            redirect_uri: Redirect URI for authorization
         """
+        self.http_client = http_client
         self.client_id = client_id
+        self.issuer_url = issuer_url
         self.redirect_uri = redirect_uri
-        self.auth_server_url = auth_server_url
-        self.client_ephemeral_sk = client_ephemeral_sk
         
-        self.pop_client = PoPClient(client_ephemeral_sk)
-        self.jwt_handler = PQJWT()
-        
-        self.id_token: Optional[str] = None
+        # State and tokens
+        self.code_verifier: Optional[str] = None
+        self.code_challenge: Optional[str] = None
         self.access_token: Optional[str] = None
-    
-    def create_authorization_url(
-        self,
-        scope: str = "openid profile email",
-        state: Optional[str] = None,
-        nonce: Optional[str] = None
-    ) -> str:
+        self.refresh_token: Optional[str] = None
+        self.id_token: Optional[str] = None
+        
+        # Telemetry storage
+        self.telemetry = {
+            'handshakes': [],
+            'tokens': [],
+            'refresh_events': []
+        }
+
+    def start_auth(self, scope: str = "openid profile email") -> str:
         """
-        Create authorization URL for user to visit.
-        
-        Args:
-            scope: Requested scopes
-            state: State parameter for CSRF protection
-            nonce: Nonce for replay protection
-        
-        Returns:
-            str: Authorization URL
+        Start the authorization flow.
+        Generates PKCE verifier/challenge and returns the auth URL.
         """
-        if not state:
-            state = generate_random_string(16)
-        if not nonce:
-            nonce = generate_random_string(16)
+        # PKCE: Proof Key for Code Exchange (S256)
+        # 1. Generate code_verifier (random URL-safe string, 43-128 chars)
+        self.code_verifier = generate_random_string(64)
         
+        # 2. Derive code_challenge = Base64url(SHA256(code_verifier))
+        sha256_hash = hashlib.sha256(self.code_verifier.encode('utf-8')).digest()
+        self.code_challenge = base64.urlsafe_b64encode(sha256_hash).decode('ascii').rstrip('=')
+        
+        # 3. Construct Authorization URL
         params = {
-            'response_type': 'code',
             'client_id': self.client_id,
-            'redirect_uri': self.redirect_uri,
+            'response_type': 'code',
             'scope': scope,
-            'state': state,
-            'nonce': nonce
+            'redirect_uri': self.redirect_uri,
+            'code_challenge': self.code_challenge,
+            'code_challenge_method': 'S256',
+            'state': generate_random_string(16)
         }
         
-        query_string = '&'.join(f"{k}={v}" for k, v in params.items())
-        return f"{self.auth_server_url}/authorize?{query_string}"
-    
-    def exchange_code_for_tokens(
-        self,
-        code: str
-    ) -> Dict[str, Any]:
-        """
-        Exchange authorization code for tokens.
+        query = "&".join([f"{k}={v}" for k, v in params.items()])
+        auth_url = f"{self.issuer_url}/authorize?{query}"
         
-        Args:
-            code: Authorization code from server
-        
-        Returns:
-            dict: Token response containing id_token and access_token
+        return auth_url
+
+    def exchange_code(self, code: str) -> Dict[str, Any]:
         """
-        # In real implementation, this would make HTTP request to token endpoint
-        # For now, we return a mock response
-        return {
-            'access_token': 'mock_access_token',
-            'token_type': 'Bearer',
-            'id_token': 'mock_id_token',
-            'expires_in': 3600
+        Exchange the authorization code for tokens.
+        """
+        if not self.code_verifier:
+            raise ValueError("No code_verifier found - call start_auth first.")
+            
+        token_url = f"{self.issuer_url}/token"
+        data = {
+            'grant_type': 'authorization_code',
+            'code': code,
+            'redirect_uri': self.redirect_uri,
+            'client_id': self.client_id,
+            'code_verifier': self.code_verifier
         }
-    
-    def store_tokens(self, token_response: Dict[str, Any]):
-        """Store received tokens."""
-        self.id_token = token_response.get('id_token')
-        self.access_token = token_response.get('access_token')
-    
-    def create_pop_proof_for_resource(
-        self,
-        challenge: Dict[str, Any]
-    ) -> str:
+        
+        start_time = time.perf_counter()
+        resp = self.http_client.post(token_url, data=data)
+        duration = (time.perf_counter() - start_time) * 1000  # in ms
+        
+        if resp.get('status') != 200:
+            raise ValueError(f"Token exchange failed (Status {resp.get('status')}): {resp.get('body')}")
+            
+        # Parse Response
+        token_data = resp.get('body', {})
+        self.access_token = token_data.get('access_token')
+        self.refresh_token = token_data.get('refresh_token')
+        self.id_token = token_data.get('id_token')
+        
+        # Capture Telemetry
+        metadata = resp.get('kemtls_metadata', {})
+        self.telemetry['handshakes'].append({
+            'mode': metadata.get('mode'),
+            'duration_ms': duration,
+            'session_id': metadata.get('session_id')
+        })
+        
+        if self.access_token:
+            self.telemetry['tokens'].append({
+                'type': 'access',
+                'size_bytes': len(self.access_token),
+                'binding_claim': metadata.get('session_binding_id')
+            })
+            
+        return token_data
+
+    def call_api(self, api_url: str) -> Dict[str, Any]:
         """
-        Create PoP proof for accessing protected resource.
-        
-        Args:
-            challenge: Challenge from resource server
-        
-        Returns:
-            str: PoP proof (base64url-encoded signature)
+        Perform an authenticated API call.
         """
-        if not self.id_token:
-            raise ValueError("No ID token available")
+        if not self.access_token:
+            raise ValueError("No access token available - exchange code first.")
+            
+        headers = {
+            'Authorization': f"Bearer {self.access_token}"
+        }
         
-        return self.pop_client.create_pop_proof(challenge, self.id_token)
+        resp = self.http_client.get(api_url, headers=headers)
+        return resp
+
+    def refresh(self) -> Dict[str, Any]:
+        """
+        Refresh the access token.
+        """
+        if not self.refresh_token:
+            raise ValueError("No refresh token available.")
+            
+        token_url = f"{self.issuer_url}/token"
+        data = {
+            'grant_type': 'refresh_token',
+            'refresh_token': self.refresh_token,
+            'client_id': self.client_id
+        }
+        
+        resp = self.http_client.post(token_url, data=data)
+        
+        if resp.get('status') != 200:
+            raise ValueError(f"Token refresh failed: {resp.get('body')}")
+            
+        token_data = resp.get('body', {})
+        self.access_token = token_data.get('access_token')
+        self.refresh_token = token_data.get('refresh_token')
+        
+        self.telemetry['refresh_events'].append({
+            'timestamp': time.time(),
+            'status': 'success'
+        })
+        
+        return token_data
+
+    def replay_attack(self, api_url: str) -> Dict[str, Any]:
+        """
+        Perform a replay attack demonstration.
+        Tries to use a token from one session on a new session.
+        """
+        if not self.access_token:
+            raise ValueError("No token to replay - generate one first.")
+            
+        # Create a FRESH http client (new session)
+        new_client = KEMTLSHttpClient(
+            ca_pk=self.http_client.ca_pk,
+            pdk_store=self.http_client.pdk_store,
+            expected_identity=self.http_client.expected_identity,
+            mode=self.http_client.mode
+        )
+        
+        headers = {
+            'Authorization': f"Bearer {self.access_token}"
+        }
+        
+        # This SHOULD fail on the server due to binding mismatch
+        # server_binding_id in token != current session_id
+        print("Demonstrating Replay Attack: Using bound token in new session...")
+        resp = new_client.get(api_url, headers=headers)
+        
+        return resp
+
+    def get_telemetry(self) -> Dict[str, Any]:
+        """Return the collected telemetry."""
+        return self.telemetry

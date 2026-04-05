@@ -34,6 +34,16 @@ from utils.serialization import serialize_message, deserialize_message
 from utils.helpers import generate_random_string
 
 
+def _decode_bytes_field(message: Dict[str, Any], field_name: str) -> bytes:
+    """Decode a serialized Base64url field back to bytes."""
+    value = message.get(field_name)
+    if isinstance(value, str):
+        return base64url_decode(value)
+    if isinstance(value, bytes):
+        return value
+    raise TypeError(f"{field_name} must be bytes")
+
+
 class ClientHandshake:
     """
     Client-side KEMTLS handshake state machine.
@@ -73,7 +83,7 @@ class ClientHandshake:
         self.transcript.append(msg)
         return msg
 
-    def process_server_hello(self, msg_bytes: bytes) -> bytes:
+    def process_server_hello(self, msg_bytes: bytes) -> Tuple[bytes, KEMTLSSession]:
         """Process ServerHello and return ClientKeyExchange."""
         sh = deserialize_message(msg_bytes)
         self.transcript.append(msg_bytes)
@@ -82,7 +92,7 @@ class ClientHandshake:
             raise ValueError("Incompatible KEMTLS version")
             
         mode = sh.get('mode')
-        server_eph_pk = sh.get('eph_pk')
+        server_eph_pk = _decode_bytes_field(sh, 'eph_pk')
         
         # 1. Identity Validation
         if mode == 'baseline':
@@ -124,16 +134,28 @@ class ClientHandshake:
         self.client_fin_key = fin_keys['client_finished_key']
         self.server_fin_key = fin_keys['server_finished_key']
         
-        return msg
+        session = KEMTLSSession(
+            session_id=sh['session_id'],
+            peer_identity=self.expected_identity,
+            handshake_mode=sh['mode'],
+            trusted_key_id=trusted_key_id,
+        )
 
-    def process_server_finished(self, msg_bytes: bytes) -> KEMTLSSession:
+        return msg, session
+
+    def process_server_finished(
+        self,
+        msg_bytes: bytes,
+        session: Optional[KEMTLSSession] = None,
+    ) -> KEMTLSSession:
         """Verify ServerFinished and finalize session."""
         t1 = compute_transcript_hash(self.transcript[:2])
         sf = deserialize_message(msg_bytes)
         
         # Verify MAC
+        server_mac = _decode_bytes_field(sf, 'mac')
         expected_mac = hmac.new(self.server_fin_key, t1, hashlib.sha256).digest()
-        if sf.get('mac') != expected_mac:
+        if server_mac != expected_mac:
             raise ValueError("ServerFinished MAC verification failed")
             
         self.transcript.append(msg_bytes)
@@ -150,21 +172,25 @@ class ClientHandshake:
         client_iv = hkdf_expand_label(app_traffic['client_application_traffic_secret'], b"iv", b"", 12)
         server_iv = hkdf_expand_label(app_traffic['server_application_traffic_secret'], b"iv", b"", 12)
 
-        return KEMTLSSession(
-            session_id=sh['session_id'],
-            peer_identity=self.expected_identity,
-            handshake_mode=sh['mode'],
-            trusted_key_id=sh.get('key_id'),
-            client_app_secret=app_traffic['client_application_traffic_secret'],
-            server_app_secret=app_traffic['server_application_traffic_secret'],
-            client_write_key=app_traffic['client_application_traffic_secret'], # Simplified: use secret as key
-            client_write_iv=client_iv,
-            server_write_key=app_traffic['server_application_traffic_secret'],
-            server_write_iv=server_iv,
-            exporter_secret=exporter_secret,
-            session_binding_id=derive_session_binding_id(exporter_secret),
-            refresh_binding_id=derive_refresh_binding_id(exporter_secret)
-        )
+        if session is None:
+            session = KEMTLSSession(
+                session_id=sh['session_id'],
+                peer_identity=self.expected_identity,
+                handshake_mode=sh['mode'],
+                trusted_key_id=sh.get('key_id'),
+            )
+
+        session.client_app_secret = app_traffic['client_application_traffic_secret']
+        session.server_app_secret = app_traffic['server_application_traffic_secret']
+        session.client_write_key = app_traffic['client_application_traffic_secret']
+        session.client_write_iv = client_iv
+        session.server_write_key = app_traffic['server_application_traffic_secret']
+        session.server_write_iv = server_iv
+        session.exporter_secret = exporter_secret
+        session.session_binding_id = derive_session_binding_id(exporter_secret)
+        session.refresh_binding_id = derive_refresh_binding_id(exporter_secret)
+
+        return session
 
     def client_finished(self) -> bytes:
         """Generate ClientFinished."""
@@ -238,8 +264,10 @@ class ServerHandshake:
         self.transcript.append(msg_bytes)
         
         # 1. Decapsulate
-        ss_eph = MLKEM768.decapsulate(self.eph_sk, cke['ct_ephemeral'])
-        ss_lt = MLKEM768.decapsulate(self.server_lt_sk, cke['ct_longterm'])
+        ct_eph = _decode_bytes_field(cke, 'ct_ephemeral')
+        ct_lt = _decode_bytes_field(cke, 'ct_longterm')
+        ss_eph = MLKEM768.decapsulate(self.eph_sk, ct_eph)
+        ss_lt = MLKEM768.decapsulate(self.server_lt_sk, ct_lt)
         
         # 2. Derive Handshake Secrets
         self.handshake_secret = derive_handshake_secret([ss_eph, ss_lt])
@@ -264,7 +292,8 @@ class ServerHandshake:
         t2 = compute_transcript_hash(self.transcript[:3])
         cf = deserialize_message(msg_bytes)
         
-        if hmac.new(self.client_fin_key, t2, hashlib.sha256).digest() != cf.get('mac'):
+        client_mac = _decode_bytes_field(cf, 'mac')
+        if hmac.new(self.client_fin_key, t2, hashlib.sha256).digest() != client_mac:
             raise ValueError("ClientFinished MAC verification failed")
             
         self.transcript.append(msg_bytes)

@@ -7,15 +7,12 @@ import pytest
 from oidc.auth_endpoints import AuthorizationEndpoint, InMemoryClientRegistry
 from oidc.introspection_endpoints import IntrospectionEndpoint
 from oidc.jwt_handler import PQJWT
-<<<<<<< Updated upstream
 from crypto.ml_dsa import DilithiumSignature
 from utils.helpers import get_timestamp
-=======
 from oidc.refresh_store import RefreshTokenStore
 from oidc.token_endpoints import TokenEndpoint
 from oidc.userinfo_endpoints import UserInfoEndpoint
 from utils.encoding import base64url_encode
->>>>>>> Stashed changes
 
 
 @dataclass
