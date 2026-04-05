@@ -1,186 +1,168 @@
-"""Virtual sandbox test for client package.
-
-Runs client modules with dummy replacements for external dependencies.
-Prints each function execution to CLI.
-"""
+"""Standalone smoke test for the current client package."""
 
 from __future__ import annotations
 
-import importlib.util
+import hashlib
 import os
 import sys
-import types
+from dataclasses import dataclass
 
 
 CURRENT_DIR = os.path.dirname(__file__)
 SRC_DIR = os.path.dirname(CURRENT_DIR)
 
-# Avoid stdlib `token` shadowing when running as a script from src/client
 if sys.path and sys.path[0] == CURRENT_DIR:
     sys.path.pop(0)
-
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-
-def _load_module(module_name: str, file_path: str) -> types.ModuleType:
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load module: {module_name}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+import client.oidc_client as oidc_client_module
+from client.kemtls_http_client import KEMTLSHttpClient
+from client.oidc_client import OIDCClient
+from utils.encoding import base64url_encode
 
 
-def _install_fake_dependencies() -> None:
-    # pop.client
-    pop_pkg = types.ModuleType("pop")
-    pop_pkg.__path__ = [os.path.join(SRC_DIR, "pop")]
-    sys.modules["pop"] = pop_pkg
+@dataclass
+class DummySession:
+    session_id: str
+    handshake_mode: str
+    session_binding_id: bytes | str
+    trusted_key_id: str | None = None
 
-    pop_client = types.ModuleType("pop.client")
 
-    class PoPClient:
-        def __init__(self, client_ephemeral_sk: bytes):
-            self.client_ephemeral_sk = client_ephemeral_sk
+class FakeTransportClient:
+    def request(self, host, port, method, path, body=b""):
+        if method == "GET":
+            raw = (
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: 16\r\n"
+                b"\r\n"
+                b'{"status":"ok"}'
+            )
+        else:
+            raw = (
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: 2\r\n"
+                b"\r\n"
+                b"{}"
+            )
+        session = DummySession(
+            session_id="sess-1",
+            handshake_mode="baseline",
+            session_binding_id="binding-1",
+            trusted_key_id=None,
+        )
+        return raw, session
 
-        def create_pop_proof(self, challenge, id_token):
-            return "pop-proof"
 
-    pop_client.PoPClient = PoPClient
-    sys.modules["pop.client"] = pop_client
+class FakeHTTPClient:
+    def __init__(self):
+        self.ca_pk = None
+        self.pdk_store = None
+        self.expected_identity = "issuer.example"
+        self.mode = "auto"
+        self.calls = []
 
-    # oidc.jwt_handler
-    oidc_pkg = types.ModuleType("oidc")
-    oidc_pkg.__path__ = [os.path.join(SRC_DIR, "oidc")]
-    sys.modules["oidc"] = oidc_pkg
+    def post(self, url, headers=None, data=None, json_data=None):
+        self.calls.append(("POST", url, headers, data, json_data))
+        payload = data or json_data or {}
+        if payload.get("grant_type") == "authorization_code":
+            return {
+                "status": 200,
+                "body": {
+                    "access_token": "access-token-1",
+                    "refresh_token": "refresh-token-1",
+                    "id_token": "id-token-1",
+                },
+                "kemtls_metadata": {
+                    "mode": "baseline",
+                    "session_id": "sess-1",
+                    "session_binding_id": "binding-1",
+                },
+            }
+        if payload.get("grant_type") == "refresh_token":
+            return {
+                "status": 200,
+                "body": {
+                    "access_token": "access-token-2",
+                    "refresh_token": "refresh-token-2",
+                },
+                "kemtls_metadata": {
+                    "mode": "pdk",
+                    "session_id": "sess-2",
+                    "session_binding_id": "binding-2",
+                },
+            }
+        raise AssertionError(f"Unexpected POST payload: {payload}")
 
-    jwt_handler = types.ModuleType("oidc.jwt_handler")
+    def get(self, url, headers=None, params=None):
+        self.calls.append(("GET", url, headers, params, None))
+        return {
+            "status": 200,
+            "body": {"sub": "alice", "status": "ok"},
+            "kemtls_metadata": {
+                "mode": "baseline",
+                "session_id": "sess-1",
+                "session_binding_id": "binding-1",
+            },
+        }
 
-    class PQJWT:
-        pass
 
-    jwt_handler.PQJWT = PQJWT
-    sys.modules["oidc.jwt_handler"] = jwt_handler
-
-    # utils.helpers
-    utils_pkg = types.ModuleType("utils")
-    utils_pkg.__path__ = [os.path.join(SRC_DIR, "utils")]
-    sys.modules["utils"] = utils_pkg
-
-    utils_helpers = types.ModuleType("utils.helpers")
-
-    def generate_random_string(length: int = 16, charset: str | None = None) -> str:
-        return "x" * length
-
-    utils_helpers.generate_random_string = generate_random_string
-    sys.modules["utils.helpers"] = utils_helpers
-
-    # kemtls.session
-    kemtls_pkg = types.ModuleType("kemtls")
-    kemtls_pkg.__path__ = [os.path.join(SRC_DIR, "kemtls")]
-    sys.modules["kemtls"] = kemtls_pkg
-
-    kemtls_session = types.ModuleType("kemtls.session")
-
-    class _Handshake:
-        client_ephemeral_pk = b"client-pk"
-        client_ephemeral_sk = b"client-sk"
-
-        def client_process_server_hello(self, server_hello, server_longterm_pk):
-            return {"client_key_exchange": "ok"}, b"client-epk"
-
-    class KEMTLSSession:
-        def __init__(self, is_server: bool = False):
-            self.handshake = _Handshake()
-
-        def establish_channel(self):
-            return KEMTLSChannel()
-
-        def get_session_id(self):
-            return "session-1"
-
-    kemtls_session.KEMTLSSession = KEMTLSSession
-    sys.modules["kemtls.session"] = kemtls_session
-
-    # kemtls.channel
-    kemtls_channel = types.ModuleType("kemtls.channel")
-
-    class KEMTLSChannel:
-        def send(self, data: bytes) -> bytes:
-            return b"enc:" + data
-
-        def receive(self, encrypted: bytes) -> bytes:
-            prefix = b"enc:"
-            return encrypted[len(prefix):] if encrypted.startswith(prefix) else encrypted
-
-    kemtls_channel.KEMTLSChannel = KEMTLSChannel
-    sys.modules["kemtls.channel"] = kemtls_channel
+def _pkce(verifier: str) -> str:
+    return base64url_encode(hashlib.sha256(verifier.encode("utf-8")).digest())
 
 
 def run_sandbox() -> None:
-    print("[sandbox] installing fake dependencies")
-    _install_fake_dependencies()
+    print("[kemtls_http_client] parse raw HTTP response")
+    http_client = KEMTLSHttpClient(expected_identity="issuer.example")
+    http_client.client = FakeTransportClient()
+    parsed = http_client.get("kemtls://issuer.example/status")
+    assert parsed["status"] == 200
+    assert parsed["body"]["status"] == "ok"
+    assert parsed["kemtls_metadata"]["mode"] == "baseline"
 
-    print("[sandbox] loading client modules")
-    oidc_client = _load_module(
-        "client.oidc_client", os.path.join(CURRENT_DIR, "oidc_client.py")
-    )
-    kemtls_client = _load_module(
-        "client.kemtls_client", os.path.join(CURRENT_DIR, "kemtls_client.py")
-    )
-
-    print("[oidc_client] init OIDCClient")
-    oidc = oidc_client.OIDCClient(
+    print("[oidc_client] start_auth generates PKCE")
+    fake_http = FakeHTTPClient()
+    oidc = OIDCClient(
+        http_client=fake_http,
         client_id="client123",
-        redirect_uri="https://client/cb",
-        auth_server_url="https://issuer.example",
-        client_ephemeral_sk=b"sk",
+        issuer_url="kemtls://issuer.example",
+        redirect_uri="https://client.example/cb",
     )
+    auth_url = oidc.start_auth()
+    assert "code_challenge=" in auth_url
+    assert oidc.code_verifier is not None
+    assert oidc.code_challenge == _pkce(oidc.code_verifier)
 
-    print("[oidc_client] create_authorization_url")
-    url = oidc.create_authorization_url()
-    assert "authorize" in url
+    print("[oidc_client] exchange_code stores issued tokens")
+    token_data = oidc.exchange_code("auth-code-1")
+    assert token_data["access_token"] == "access-token-1"
+    assert oidc.access_token == "access-token-1"
+    assert oidc.refresh_token == "refresh-token-1"
+    assert oidc.id_token == "id-token-1"
+    assert oidc.telemetry["handshakes"][0]["mode"] == "baseline"
 
-    print("[oidc_client] exchange_code_for_tokens")
-    tokens = oidc.exchange_code_for_tokens("dummy-code")
-    assert tokens["token_type"] == "Bearer"
+    print("[oidc_client] call_api uses bearer token")
+    api_response = oidc.call_api("kemtls://issuer.example/userinfo")
+    assert api_response["status"] == 200
+    assert api_response["body"]["sub"] == "alice"
+    get_call = fake_http.calls[-1]
+    assert get_call[2]["Authorization"] == "Bearer access-token-1"
 
-    print("[oidc_client] store_tokens")
-    oidc.store_tokens(tokens)
-    assert oidc.id_token == "mock_id_token"
+    print("[oidc_client] refresh rotates tokens")
+    refreshed = oidc.refresh()
+    assert refreshed["access_token"] == "access-token-2"
+    assert oidc.refresh_token == "refresh-token-2"
+    assert oidc.telemetry["refresh_events"][-1]["status"] == "success"
 
-    print("[oidc_client] create_pop_proof_for_resource")
-    proof = oidc.create_pop_proof_for_resource({"challenge": "x"})
-    assert proof == "pop-proof"
+    print("[oidc_client] replay_attack creates a fresh client")
+    oidc_client_module.KEMTLSHttpClient = lambda **_: FakeHTTPClient()
+    replay_response = oidc.replay_attack("kemtls://issuer.example/userinfo")
+    assert replay_response["status"] == 200
 
-    print("[kemtls_client] init KEMTLSClient")
-    kem = kemtls_client.KEMTLSClient()
-
-    print("[kemtls_client] perform_handshake")
-    ckx = kem.perform_handshake({"server_hello": True}, b"server-pk")
-    assert ckx["client_key_exchange"] == "ok"
-
-    print("[kemtls_client] establish_secure_channel")
-    channel = kem.establish_secure_channel()
-    assert channel is not None
-
-    print("[kemtls_client] send_encrypted / receive_encrypted")
-    enc = kem.send_encrypted(b"hello")
-    dec = kem.receive_encrypted(enc)
-    assert dec == b"hello"
-
-    print("[kemtls_client] get_client_ephemeral_pubkey")
-    assert kem.get_client_ephemeral_pubkey() == b"client-pk"
-
-    print("[kemtls_client] get_client_ephemeral_secretkey")
-    assert kem.get_client_ephemeral_secretkey() == b"client-sk"
-
-    print("[kemtls_client] get_session_id")
-    assert kem.get_session_id() == "session-1"
-
-    print("✅ client sandbox checks passed")
+    print("client sandbox checks passed")
 
 
 if __name__ == "__main__":
