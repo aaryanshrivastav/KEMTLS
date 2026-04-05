@@ -784,9 +784,9 @@ function VerticalFlowVisualizer({ steps, selectedStep, flowState, runMode, waiti
                       )}
                     </button>
 
-                    {/* Threat tooltip — ALWAYS on the left side */}
+                    {/* Threat tooltip — Left for all except the first ('hello') node */}
                     {hasThreat && activeThreat && (() => {
-                      const showOnLeft = true;
+                      const showOnLeft = step.id !== 'hello';
                       const arrowColor = activeThreat.severity === 'critical' ? 'rgba(212,92,110,0.5)' : activeThreat.severity === 'high' ? 'rgba(212,140,92,0.5)' : 'rgba(212,165,92,0.5)';
 
                       return (
