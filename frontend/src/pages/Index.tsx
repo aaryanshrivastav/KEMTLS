@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { io, Socket } from 'socket.io-client';
 import { CyberCursor } from '../components/CyberCursor';
 import { GridBackground } from '../components/GridBackground';
 import { useThreatPopups, THREATS } from '../components/ThreatPopup';
@@ -25,6 +26,9 @@ interface LogEntry {
 
 type FlowState = 'idle' | 'running' | 'paused' | 'done';
 type RunMode = 'full' | 'step';
+
+const SOCKET_URL = 'http://localhost:5002';
+const BACKEND_STEP_IDS = ['hello', 'server', 'derive', 'finished', 'auth', 'token', 'bind', 'access'] as const;
 
 /* ──────────────────────────────────────────
    Step definitions with explanations for click-and-resume
@@ -74,8 +78,8 @@ const INITIAL_STEPS: FlowStep[] = [
   },
   {
     id: 'access', label: 'RESOURCE ACCESS',
-    detail: 'GET /userinfo + PoP proof → 200 OK',
-    explanation: 'The client accesses protected resources by presenting the bound access token with a Proof-of-Possession signature (ML-DSA-65). The resource server verifies both the token signature and the PoP proof, confirming sender identity.',
+    detail: 'GET /resource with Bearer token over KEMTLS',
+    explanation: 'The client calls the protected resource endpoint with the issued access token. The resource server verifies the token contract against the active KEMTLS session and either grants access or rejects if the session binding does not match.',
     status: 'idle',
   },
 ];
@@ -118,12 +122,35 @@ export default function Index() {
   const [terminalWidth, setTerminalWidth] = useState(380);
   const [waitingForClick, setWaitingForClick] = useState(false);
   const [currentStepIdx, setCurrentStepIdx] = useState(-1);
+  const [isBackendConnected, setIsBackendConnected] = useState(false);
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
   const logBoxRef = useRef<HTMLDivElement>(null);
-  const resumeRef = useRef<(() => void) | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const currentRunIdRef = useRef<string | null>(null);
+  const fullFlowRunIdRef = useRef(0);
   const isDraggingRef = useRef(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const { activeThreat, triggerThreat, dismissThreat } = useThreatPopups();
+  const triggerThreatRef = useRef(triggerThreat);
+
+  const stepIndexById = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    currentRunIdRef.current = currentRunId;
+  }, [currentRunId]);
+
+  useEffect(() => {
+    triggerThreatRef.current = triggerThreat;
+  }, [triggerThreat]);
+
+  useEffect(() => {
+    const mapping: Record<string, number> = {};
+    INITIAL_STEPS.forEach((step, idx) => {
+      mapping[step.id] = idx;
+    });
+    stepIndexById.current = mapping;
+  }, []);
 
   // Scroll logs to bottom
   useEffect(() => {
@@ -143,6 +170,218 @@ export default function Index() {
   const addLog = useCallback((level: LogEntry['level'], msg: string) => {
     setLogs(prev => [...prev, { ts: Date.now(), level, msg }]);
   }, []);
+
+  const resetUiState = useCallback(() => {
+    setFlowState('idle');
+    setWaitingForClick(false);
+    setCurrentStepIdx(-1);
+    setSelectedStep(null);
+    setSteps(INITIAL_STEPS);
+    setLogs([]);
+    setElapsed(0);
+  }, []);
+
+  const applySnapshot = useCallback((snapshot: {
+    hasActiveRun: boolean;
+    runId?: string;
+    status?: 'idle' | 'running' | 'paused' | 'done' | 'error';
+    stepIndex?: number;
+    currentStepId?: string | null;
+    nextStepId?: string | null;
+  }) => {
+    if (!snapshot.hasActiveRun) {
+      setCurrentRunId(null);
+      resetUiState();
+      return;
+    }
+
+    const runId = snapshot.runId || null;
+    if (runId) setCurrentRunId(runId);
+
+    const stepIndex = typeof snapshot.stepIndex === 'number' ? snapshot.stepIndex : 0;
+    const status = snapshot.status || 'idle';
+
+    setSteps(prev => prev.map((step, idx) => {
+      const isBackendStep = BACKEND_STEP_IDS.includes(step.id as (typeof BACKEND_STEP_IDS)[number]);
+      if (!isBackendStep) return step;
+
+      if (idx < stepIndex) {
+        return { ...step, status: 'done' };
+      }
+
+      if (status === 'running' && idx === stepIndex) {
+        return { ...step, status: 'running' };
+      }
+
+      return { ...step, status: 'idle' };
+    }));
+
+    if (status === 'paused') {
+      const nextId = snapshot.nextStepId || null;
+      if (nextId) {
+        const nextIdx = stepIndexById.current[nextId];
+        if (nextIdx !== undefined) {
+          setCurrentStepIdx(nextIdx - 1);
+          setSelectedStep(INITIAL_STEPS[Math.max(nextIdx - 1, 0)]?.id || null);
+        }
+      }
+      setWaitingForClick(true);
+      setFlowState('paused');
+      return;
+    }
+
+    if (status === 'running') {
+      setCurrentStepIdx(stepIndex);
+      setSelectedStep(snapshot.currentStepId || INITIAL_STEPS[stepIndex]?.id || null);
+      setWaitingForClick(false);
+      setFlowState('running');
+      return;
+    }
+
+    if (status === 'done') {
+      setWaitingForClick(false);
+      setFlowState('done');
+      return;
+    }
+
+    if (status === 'error') {
+      setWaitingForClick(false);
+      setFlowState('idle');
+      return;
+    }
+  }, [resetUiState]);
+
+  // Step-by-step backend connection (Socket.IO)
+  useEffect(() => {
+    const socket = io(SOCKET_URL, {
+      transports: ['polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    });
+
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      setIsBackendConnected(true);
+      socket.emit('get_step_flow_state');
+    });
+
+    socket.on('disconnect', () => {
+      setIsBackendConnected(false);
+    });
+
+    socket.on('connected', () => {
+      // backend ready
+    });
+
+    socket.on('log', (data: { message: string; level: 'info' | 'success' | 'error' | 'warning'; timestamp: number }) => {
+      const levelMap: Record<string, LogEntry['level']> = {
+        info: 'info',
+        success: 'ok',
+        error: 'err',
+        warning: 'warn',
+      };
+      addLog(levelMap[data.level] || 'info', data.message);
+    });
+
+    socket.on('step_flow_started', (data: { runId?: string }) => {
+      if (data.runId) setCurrentRunId(data.runId);
+      setFlowState('running');
+      setElapsed(0);
+      setLogs([]);
+      setSelectedStep(null);
+      setCurrentStepIdx(-1);
+      setWaitingForClick(false);
+      setSteps(INITIAL_STEPS.map(s => ({ ...s, status: 'idle', data: undefined, durationMs: undefined })));
+    });
+
+    socket.on('handshake_step_start', (data: { stepId: string; runId?: string }) => {
+      if (currentRunIdRef.current && data.runId && data.runId !== currentRunIdRef.current) return;
+      const idx = stepIndexById.current[data.stepId];
+      if (idx === undefined) return;
+
+      setCurrentStepIdx(idx);
+      setSelectedStep(data.stepId);
+      setFlowState('running');
+      setSteps(prev => prev.map((s, i) => {
+        if (i === idx) return { ...s, status: 'running' };
+        return s;
+      }));
+      triggerThreatRef.current(data.stepId);
+    });
+
+    socket.on('handshake_step_complete', (data: { stepId: string; durationMs: number; data: Record<string, string>; isFinal: boolean; runId?: string }) => {
+      if (currentRunIdRef.current && data.runId && data.runId !== currentRunIdRef.current) return;
+      const idx = stepIndexById.current[data.stepId];
+      if (idx === undefined) return;
+
+      setSteps(prev => prev.map((s, i) => {
+        if (i === idx) {
+          return {
+            ...s,
+            status: 'done',
+            data: data.data,
+            durationMs: data.durationMs,
+          };
+        }
+        return s;
+      }));
+
+      if (data.isFinal) {
+        setWaitingForClick(false);
+        setFlowState('done');
+      }
+    });
+
+    socket.on('step_flow_paused', (data: { nextStepId: string; runId?: string }) => {
+      if (currentRunIdRef.current && data.runId && data.runId !== currentRunIdRef.current) return;
+      const nextIdx = stepIndexById.current[data.nextStepId];
+      if (nextIdx === undefined) return;
+      setCurrentStepIdx(nextIdx - 1);
+      setFlowState('paused');
+      setWaitingForClick(true);
+      addLog('info', `  ⏸ Paused — click step ${nextIdx + 1} to continue`);
+    });
+
+    socket.on('step_flow_complete', (data: { runId?: string }) => {
+      if (currentRunIdRef.current && data.runId && data.runId !== currentRunIdRef.current) return;
+      setWaitingForClick(false);
+      setFlowState('done');
+      addLog('ok', '');
+      addLog('ok', '═══════════════════════════════════════');
+      addLog('ok', '  ✓ KEMTLS + OIDC CONTRACT FLOW COMPLETE');
+      addLog('ok', '═══════════════════════════════════════');
+    });
+
+    socket.on('step_flow_error', (data: { message: string; error?: string; runId?: string }) => {
+      if (currentRunIdRef.current && data.runId && data.runId !== currentRunIdRef.current) return;
+      setFlowState('paused');
+      setWaitingForClick(true);
+      addLog('err', `${data.message}${data.error ? `: ${data.error}` : ''}`);
+      socket.emit('get_step_flow_state');
+    });
+
+    socket.on('step_flow_reset', () => {
+      setCurrentRunId(null);
+      resetUiState();
+    });
+
+    socket.on('step_flow_state', (data: {
+      hasActiveRun: boolean;
+      runId?: string;
+      status?: 'idle' | 'running' | 'paused' | 'done' | 'error';
+      stepIndex?: number;
+      currentStepId?: string | null;
+      nextStepId?: string | null;
+    }) => {
+      applySnapshot(data);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [addLog, applySnapshot, resetUiState]);
 
   /* ────── Terminal resize drag handler ────── */
   const handleTerminalDragStart = useCallback((e: React.MouseEvent) => {
@@ -172,114 +411,43 @@ export default function Index() {
     document.addEventListener('mouseup', onUp);
   }, [terminalWidth]);
 
-  /* ────── Run Full Flow (auto, no attacks) ────── */
-  const runFullFlow = useCallback(async () => {
-    if (flowState === 'running') return;
-    setFlowState('running');
-    setElapsed(0);
-    setLogs([]);
-    setSelectedStep(null);
-    setCurrentStepIdx(-1);
-    setSteps(INITIAL_STEPS.map(s => ({ ...s, status: 'idle', data: undefined, durationMs: undefined })));
-
-    addLog('info', '▸ Initializing KEMTLS handshake flow...');
-    addLog('info', `  Mode: FULL AUTO`);
-
-    for (let i = 0; i < INITIAL_STEPS.length; i++) {
-      const step = INITIAL_STEPS[i];
-      setSteps(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'running' } : s));
-      setSelectedStep(step.id);
-      setCurrentStepIdx(i);
-      addLog('data', `[${step.label}] → ${step.detail}`);
-
-      const dur = 400 + Math.random() * 800;
-      await new Promise(r => setTimeout(r, dur));
-
-      const data = makePlaceholderData(step.id);
-      setSteps(prev => prev.map((s, idx) =>
-        idx === i ? { ...s, status: 'done', data, durationMs: Math.round(dur) } : s
-      ));
-      addLog('ok', `[${step.label}] ✓ Complete (${Math.round(dur)}ms)`);
-      for (const [k, v] of Object.entries(data)) {
-        addLog('data', `    ${k}: ${v}`);
-      }
+  /* ────── Run Full Flow (real backend auto mode) ────── */
+  const runFullFlow = useCallback(() => {
+    if (flowState === 'running' || flowState === 'paused') return;
+    if (!isBackendConnected || !socketRef.current) {
+      addLog('err', 'Backend step-flow server is not connected (expected at http://localhost:5002).');
+      return;
     }
 
-    addLog('ok', '');
-    addLog('ok', '═══════════════════════════════════════');
-    addLog('ok', '  ✓ FULL PQ-OIDC FLOW COMPLETE');
-    addLog('ok', '═══════════════════════════════════════');
-    setFlowState('done');
-  }, [flowState, addLog]);
+    fullFlowRunIdRef.current += 1;
+    socketRef.current.emit('start_step_flow', { mode: 'baseline', autoAdvance: true });
+  }, [flowState, addLog, isBackendConnected]);
 
   /* ────── Run Step-by-Step (with attacks, pauses) ────── */
-  const runStepFlow = useCallback(async () => {
+  const runStepFlow = useCallback(() => {
     if (flowState === 'running' || flowState === 'paused') return;
-    setFlowState('running');
-    setElapsed(0);
-    setLogs([]);
-    setSelectedStep(null);
-    setCurrentStepIdx(-1);
-    setWaitingForClick(false);
-    setSteps(INITIAL_STEPS.map(s => ({ ...s, status: 'idle', data: undefined, durationMs: undefined })));
-
-    addLog('info', '▸ Initializing step-by-step flow...');
-    addLog('info', '  Click each step node to proceed');
-
-    for (let i = 0; i < INITIAL_STEPS.length; i++) {
-      const step = INITIAL_STEPS[i];
-      setCurrentStepIdx(i);
-      setSteps(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'running' } : s));
-      setSelectedStep(step.id);
-      addLog('data', `[${step.label}] → ${step.detail}`);
-
-      // Trigger threat popup
-      triggerThreat(step.id);
-
-      // Simulate processing
-      const dur = 600 + Math.random() * 600;
-      await new Promise(r => setTimeout(r, dur));
-
-      const data = makePlaceholderData(step.id);
-      setSteps(prev => prev.map((s, idx) =>
-        idx === i ? { ...s, status: 'done', data, durationMs: Math.round(dur) } : s
-      ));
-      addLog('ok', `[${step.label}] ✓ Complete (${Math.round(dur)}ms)`);
-      for (const [k, v] of Object.entries(data)) {
-        addLog('data', `    ${k}: ${v}`);
-      }
-
-      // Pause and wait for user to click next step (unless last step)
-      if (i < INITIAL_STEPS.length - 1) {
-        setFlowState('paused');
-        setWaitingForClick(true);
-        addLog('info', `  ⏸ Paused — click step ${i + 2} to continue`);
-        await new Promise<void>(resolve => {
-          resumeRef.current = resolve;
-        });
-        setWaitingForClick(false);
-        setFlowState('running');
-      }
+    if (!isBackendConnected || !socketRef.current) {
+      addLog('err', 'Backend step-flow server is not connected (expected at http://localhost:5002).');
+      return;
     }
 
-    addLog('ok', '');
-    addLog('ok', '═══════════════════════════════════════');
-    addLog('ok', '  ✓ FULL PQ-OIDC FLOW COMPLETE');
-    addLog('ok', '═══════════════════════════════════════');
-    setFlowState('done');
-  }, [flowState, addLog, triggerThreat]);
+    socketRef.current.emit('start_step_flow', { mode: 'baseline', autoAdvance: false });
+  }, [flowState, addLog, isBackendConnected]);
 
   /* ────── Handle node click (for step mode resume) ────── */
   const handleNodeClick = useCallback((stepId: string) => {
     if (runMode === 'step' && waitingForClick) {
       const nextIdx = currentStepIdx + 1;
-      if (nextIdx < INITIAL_STEPS.length && INITIAL_STEPS[nextIdx].id === stepId) {
-        resumeRef.current?.();
-        resumeRef.current = null;
+      if (
+        nextIdx < INITIAL_STEPS.length
+        && INITIAL_STEPS[nextIdx].id === stepId
+        && BACKEND_STEP_IDS.includes(stepId as (typeof BACKEND_STEP_IDS)[number])
+      ) {
+        socketRef.current?.emit('continue_step_flow', { runId: currentRunId });
       }
     }
     setSelectedStep(stepId);
-  }, [runMode, waitingForClick, currentStepIdx]);
+  }, [runMode, waitingForClick, currentStepIdx, currentRunId]);
 
   const startFlow = useCallback(() => {
     if (runMode === 'full') {
@@ -290,16 +458,16 @@ export default function Index() {
   }, [runMode, runFullFlow, runStepFlow]);
 
   const resetFlow = useCallback(() => {
-    resumeRef.current?.();
-    resumeRef.current = null;
-    setFlowState('idle');
-    setSteps(INITIAL_STEPS);
-    setLogs([]);
-    setElapsed(0);
-    setSelectedStep(null);
-    setCurrentStepIdx(-1);
-    setWaitingForClick(false);
-  }, []);
+    // Cancel any in-flight full-flow async loop immediately.
+    fullFlowRunIdRef.current += 1;
+
+    // Always reset backend state if a run is active, regardless of UI mode.
+    if (socketRef.current && currentRunId) {
+      socketRef.current?.emit('reset_step_flow', { runId: currentRunId });
+    }
+    setCurrentRunId(null);
+    resetUiState();
+  }, [currentRunId, resetUiState]);
 
   // Active step for explanation panel
   const activeStepObj = steps.find(s => s.id === (selectedStep || ''));
@@ -537,7 +705,7 @@ export default function Index() {
       }}>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--lime)', boxShadow: '0 0 4px var(--lime)' }} />
-          <span style={{ color: 'var(--text-mid)' }}>CONNECTED</span>
+          <span style={{ color: 'var(--text-mid)' }}>{isBackendConnected ? 'CONNECTED' : 'DISCONNECTED'}</span>
         </div>
         <span style={{ color: 'var(--text-dim)' }}>│</span>
         <span style={{ color: 'var(--text-mid)' }}>MODE: <span className="neon-text">{runMode === 'full' ? 'FULL FLOW' : 'STEP-BY-STEP'}</span></span>
@@ -574,8 +742,13 @@ function VerticalFlowVisualizer({ steps, selectedStep, flowState, runMode, waiti
   onDismissThreat: () => void;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  const stepIndexMap: Record<string, number> = {};
-  INITIAL_STEPS.forEach((s, i) => { stepIndexMap[s.id] = i; });
+  const stepIndexMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    INITIAL_STEPS.forEach((s, i) => {
+      map[s.id] = i;
+    });
+    return map;
+  }, []);
   const phaseRefs = useRef<(HTMLDivElement | null)[]>([]);
   const lastScrolledPhaseRef = useRef(-1);
 
@@ -599,7 +772,7 @@ function VerticalFlowVisualizer({ steps, selectedStep, flowState, runMode, waiti
         }
       }
     });
-  }, [currentStepIdx, scrollContainerRef]);
+  }, [currentStepIdx, scrollContainerRef, stepIndexMap]);
 
   // Reset scroll tracking on flow restart
   useEffect(() => {

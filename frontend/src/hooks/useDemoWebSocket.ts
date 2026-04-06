@@ -61,7 +61,7 @@ export const useDemoWebSocket = (): UseDemoWebSocketReturn => {
   useEffect(() => {
     // Initialize socket connection
     const socket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling'],
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,

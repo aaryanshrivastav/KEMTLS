@@ -124,6 +124,48 @@ def create_auth_app(config: dict):
             'refresh_token': 'mock-refresh-token'
         })
 
+    @app.route('/resource')
+    @app.route('/userinfo')
+    def resource():
+        session = request.environ.get('kemtls.session')
+        if not session:
+            return jsonify({'error': 'no_kemtls_session'}), 401
+
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'missing_token'}), 401
+
+        token = auth_header.split(' ')[1]
+        try:
+            parts = token.split('.')
+            if len(parts) != 2:
+                raise ValueError('Malformed token')
+
+            body_bytes = base64url_decode(parts[0])
+            signature = base64url_decode(parts[1])
+            jwt_pk = base64url_decode(config['jwt_signing_pk'])
+            if not MLDSA65.verify(jwt_pk, body_bytes, signature):
+                raise ValueError('Invalid signature')
+
+            claims = json.loads(body_bytes.decode('utf-8'))
+            if get_timestamp() > claims.get('exp', 0):
+                raise ValueError('Token expired')
+
+            token_binding_id = claims.get('session_binding_id')
+            current_binding_id = session.session_binding_id
+            if token_binding_id != current_binding_id:
+                return jsonify({'error': 'binding_mismatch', 'details': 'TBT violation'}), 403
+
+        except Exception as e:
+            return jsonify({'error': 'invalid_token', 'details': str(e)}), 401
+
+        return jsonify({
+            'status': 'access_granted',
+            'user': claims.get('sub'),
+            'binding_id': session.session_binding_id,
+            'message': 'Resource access granted on matched KEMTLS session binding.'
+        })
+
     return app
 
 

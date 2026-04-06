@@ -24,7 +24,8 @@ class KEMTLSHttpClient:
         ca_pk: Optional[bytes] = None,
         pdk_store: Optional[PDKTrustStore] = None,
         expected_identity: str = "server",
-        mode: str = "auto"
+        mode: str = "auto",
+        keep_alive: bool = False,
     ):
         """
         Initialize the HTTP client.
@@ -39,6 +40,7 @@ class KEMTLSHttpClient:
         self.pdk_store = pdk_store
         self.expected_identity = expected_identity
         self.mode = mode
+        self.keep_alive = keep_alive
         
         # Internal transport client
         self.client = KEMTLSClient(
@@ -47,6 +49,10 @@ class KEMTLSHttpClient:
             pdk_store=pdk_store,
             mode=mode
         )
+
+    def close(self) -> None:
+        """Close any active persistent KEMTLS connection."""
+        self.client.close()
 
     def get(self, url: str, headers: Optional[Dict[str, str]] = None, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """Perform an HTTP GET request."""
@@ -105,7 +111,8 @@ class KEMTLSHttpClient:
             method=method,
             path=path,
             headers=full_headers,
-            body=body
+            body=body,
+            keep_alive=self.keep_alive,
         )
         
         # Parse Response

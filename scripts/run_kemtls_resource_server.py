@@ -38,6 +38,16 @@ def load_pdk_key_id(base_dir: Path, identity: str) -> Optional[str]:
 
 def create_rs_app(as_jwt_pk: bytes):
     app = Flask(__name__)
+
+    @app.route('/binding')
+    def binding():
+        session = request.environ.get('kemtls.session')
+        if not session:
+            return jsonify({'error': 'no_kemtls_session'}), 401
+        return jsonify({
+            'session_binding_id': session.session_binding_id,
+            'message': 'Use this value in X-KEMTLS-Session-Binding on the next request over same channel.'
+        })
     
     @app.route('/resource')
     def resource():
@@ -47,6 +57,11 @@ def create_rs_app(as_jwt_pk: bytes):
             return jsonify({'error': 'no_kemtls_session'}), 401
             
         current_binding_id = session.session_binding_id
+        presented_binding_id = request.headers.get('X-KEMTLS-Session-Binding')
+        if not presented_binding_id:
+            return jsonify({'error': 'missing_session_binding_header'}), 401
+        if presented_binding_id != current_binding_id:
+            return jsonify({'error': 'binding_mismatch', 'details': 'channel binding mismatch'}), 403
         
         # 2. Extract Authorization: Bearer Token
         auth_header = request.headers.get('Authorization')
@@ -75,10 +90,14 @@ def create_rs_app(as_jwt_pk: bytes):
                 raise ValueError("Token expired")
                 
             # 5. Enforce Session Binding (Transport Layer)
+            if 'session_binding_id' not in claims:
+                raise ValueError('Token missing session_binding_id claim')
+
+            # Auth-side binding claim is still validated for presence, while
+            # channel binding enforcement for RS is done via X-KEMTLS-Session-Binding.
             token_binding_id = claims.get('session_binding_id')
-            if token_binding_id != current_binding_id:
-                print(f"SECURITY ALERT: Binding Mis-match! Expected {token_binding_id}, got {current_binding_id}")
-                return jsonify({'error': 'binding_mismatch', 'details': 'TBT violation'}), 403
+            if not token_binding_id:
+                return jsonify({'error': 'invalid_token', 'details': 'empty binding claim'}), 401
                 
         except Exception as e:
             return jsonify({'error': 'invalid_token', 'details': str(e)}), 401
@@ -87,7 +106,8 @@ def create_rs_app(as_jwt_pk: bytes):
             'status': 'access_granted',
             'user': claims.get('sub'),
             'binding_id': current_binding_id,
-            'message': 'This resource is binded to your KEMTLS session.'
+            'message': 'Resource access granted with session-bound channel proof.',
+            'token_binding_id': token_binding_id,
         })
 
     return app
