@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from typing import Dict, Optional
+from rust_ext import hashing as rust_hashing
 
 from utils.helpers import generate_random_string, get_timestamp
 
@@ -123,7 +124,7 @@ class RefreshTokenStore:
     def _hash_token(self, token_value: str) -> str:
         if not isinstance(token_value, str) or not token_value:
             raise ValueError("token_value must be a non-empty string")
-        return hashlib.sha256(token_value.encode("utf-8")).hexdigest()
+        return rust_hashing.sha256_hex(token_value, fallback=_sha256_hex_python)
 
     def _validate_issue_inputs(
         self,
@@ -145,3 +146,7 @@ class RefreshTokenStore:
 
 
 __all__ = ["RefreshTokenRecord", "RefreshTokenStore"]
+
+
+def _sha256_hex_python(data: str) -> str:
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()

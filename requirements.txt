@@ -1,6 +1,7 @@
 # Post-Quantum Cryptography
 pqcrypto==0.4.0
 pycryptodomex==3.20.0
+liboqs-python==0.14.1
 
 # Cryptography
 cryptography==41.0.7
@@ -31,3 +32,7 @@ flake8==7.0.0
 matplotlib==3.8.2
 numpy==1.26.2
 pandas==2.1.4
+psutil==5.9.8
+
+# Rust extension build tooling
+maturin>=1.5,<2.0

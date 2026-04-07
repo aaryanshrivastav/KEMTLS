@@ -9,12 +9,18 @@ from io import BytesIO
 from typing import Dict, Any, Optional
 from flask import Flask, request, g
 from .session import KEMTLSSession
+from rust_ext import http as rust_http
 
 
 def parse_http_request(raw_data: bytes) -> Dict[str, Any]:
     """
     Minimalistic HTTP/1.1 request parser.
     """
+    return rust_http.parse_http_request(raw_data, fallback=_parse_http_request_python)
+
+
+def _parse_http_request_python(raw_data: bytes) -> Dict[str, Any]:
+    """Pure Python fallback parser used when Rust backend is unavailable."""
     lines = raw_data.split(b"\r\n")
     if not lines:
         raise ValueError("Empty request")

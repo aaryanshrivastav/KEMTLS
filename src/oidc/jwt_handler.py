@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from typing import Any, Dict, Optional, Tuple
+from rust_ext import jwt as rust_jwt
 
 from crypto.ml_dsa import MLDSA65
 from utils.encoding import base64url_decode, base64url_encode
@@ -52,7 +53,11 @@ class PQJWT:
 
         header_b64 = base64url_encode(serialize_message(header))
         payload_b64 = base64url_encode(serialize_message(claims))
-        signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+        signing_input = rust_jwt.jwt_signing_input(
+            header_b64,
+            payload_b64,
+            fallback=_jwt_signing_input_python,
+        )
         signature = MLDSA65.sign(issuer_sk, signing_input)
         
         if collector:
@@ -83,11 +88,10 @@ class PQJWT:
         if not isinstance(token, str):
             raise TypeError("token must be a string")
 
-        parts = token.split(".")
-        if len(parts) != 3:
-            raise ValueError("invalid JWT format")
-
-        header_b64, payload_b64, signature_b64 = parts
+        header_b64, payload_b64, signature_b64 = rust_jwt.split_jwt(
+            token,
+            fallback=_split_jwt_python,
+        )
         header = deserialize_message(base64url_decode(header_b64))
         payload = deserialize_message(base64url_decode(payload_b64))
         if not isinstance(header, dict):
@@ -102,7 +106,11 @@ class PQJWT:
                 f"unexpected JWT type: expected {expected_type}, got {header.get('typ')}"
             )
 
-        signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+        signing_input = rust_jwt.jwt_signing_input(
+            header_b64,
+            payload_b64,
+            fallback=_jwt_signing_input_python,
+        )
         signature = base64url_decode(signature_b64)
         if not MLDSA65.verify(issuer_pk, signing_input, signature):
             raise ValueError("invalid JWT signature")
@@ -186,10 +194,11 @@ class PQJWT:
 
     def extract_confirmation_claim(self, token: str) -> Optional[Dict[str, Any]]:
         try:
-            parts = token.split(".")
-            if len(parts) != 3:
-                return None
-            payload = deserialize_message(base64url_decode(parts[1]))
+            _, payload_b64, _ = rust_jwt.split_jwt(
+                token,
+                fallback=_split_jwt_python,
+            )
+            payload = deserialize_message(base64url_decode(payload_b64))
             cnf = payload.get("cnf")
             return cnf if isinstance(cnf, dict) else None
         except Exception:
@@ -210,6 +219,17 @@ class PQJWT:
             raise ValueError("issuer mismatch")
         if audience is not None and claims.get("aud") != audience:
             raise ValueError("audience mismatch")
+
+
+def _split_jwt_python(token: str) -> Tuple[str, str, str]:
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError("invalid JWT format")
+    return parts[0], parts[1], parts[2]
+
+
+def _jwt_signing_input_python(header_b64: str, payload_b64: str) -> bytes:
+    return f"{header_b64}.{payload_b64}".encode("ascii")
 
 
 __all__ = ["ACCESS_TOKEN_TYPE", "DEFAULT_KID", "ID_TOKEN_TYPE", "PQJWT"]

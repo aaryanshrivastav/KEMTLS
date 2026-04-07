@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from typing import Any, Dict
+from rust_ext import hashing as rust_hashing
 
 from utils.encoding import base64url_encode
 
@@ -17,7 +18,12 @@ def build_access_token_binding_claim(session) -> Dict[str, Dict[str, str]]:
     return {
         "cnf": {
             "kmt": BINDING_METHOD,
-            "kbh": base64url_encode(hashlib.sha256(binding_id).digest()),
+            "kbh": base64url_encode(
+                rust_hashing.sha256_digest(
+                    binding_id,
+                    fallback=_sha256_digest_python,
+                )
+            ),
         }
     }
 
@@ -45,7 +51,12 @@ def build_refresh_binding_metadata(session) -> Dict[str, str]:
     binding_id = _get_session_bytes(session, "refresh_binding_id")
     return {
         "binding_method": BINDING_METHOD,
-        "binding_hash": base64url_encode(hashlib.sha256(binding_id).digest()),
+        "binding_hash": base64url_encode(
+            rust_hashing.sha256_digest(
+                binding_id,
+                fallback=_sha256_digest_python,
+            )
+        ),
     }
 
 
@@ -73,6 +84,10 @@ def _get_session_bytes(session, attribute: str) -> bytes:
     if isinstance(value, str) and value:
         return value.encode("utf-8")
     raise ValueError(f"session.{attribute} must be populated bytes or str")
+
+
+def _sha256_digest_python(data: bytes) -> bytes:
+    return hashlib.sha256(data).digest()
 
 
 __all__ = [

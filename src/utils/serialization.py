@@ -21,6 +21,7 @@ Tests:
 import json
 from typing import Any, Dict
 from .encoding import base64url_encode
+from rust_ext import serialization as rust_serialization
 
 __all__ = ["serialize_message", "deserialize_message", "CanonicalJSONEncoder"]
 
@@ -70,9 +71,10 @@ def serialize_message(message: Dict[str, Any]) -> bytes:
         raise TypeError("Message must be a dictionary")
     
     try:
-        # Use our canonical encoder
-        json_str = json.dumps(message, cls=CanonicalJSONEncoder)
-        return json_str.encode('utf-8')
+        return rust_serialization.canonical_json_encode(
+            message,
+            fallback=_serialize_message_python,
+        )
     except (ValueError, TypeError) as e:
         raise ValueError(f"Failed to serialize message: {e}")
 
@@ -99,9 +101,25 @@ def deserialize_message(data: bytes) -> Dict[str, Any]:
         raise TypeError("Data must be bytes")
     
     try:
+        return rust_serialization.canonical_json_decode(
+            data,
+            fallback=_deserialize_message_python,
+        )
+    except (ValueError, UnicodeDecodeError) as e:
+        message = str(e)
+        if message.startswith("Invalid JSON data"):
+            raise ValueError(message)
+        raise ValueError(f"Failed to deserialize message: {e}")
+
+
+def _serialize_message_python(message: Dict[str, Any]) -> bytes:
+    json_str = json.dumps(message, cls=CanonicalJSONEncoder)
+    return json_str.encode('utf-8')
+
+
+def _deserialize_message_python(data: bytes) -> Dict[str, Any]:
+    try:
         json_str = data.decode('utf-8')
         return json.loads(json_str)
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON data: {e}")
-    except (ValueError, UnicodeDecodeError) as e:
-        raise ValueError(f"Failed to deserialize message: {e}")
