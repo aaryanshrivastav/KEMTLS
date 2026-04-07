@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+import argparse
+import csv
+from pathlib import Path
+from typing import Dict, List
+
+import matplotlib.pyplot as plt
+
+
+def _load_rows(path: Path) -> List[Dict[str, str]]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8", newline="") as fh:
+        return list(csv.DictReader(fh))
+
+
+def _group_avg(rows: List[Dict[str, str]], key_col: str, value_col: str) -> Dict[str, float]:
+    sums: Dict[str, float] = {}
+    counts: Dict[str, int] = {}
+    for row in rows:
+        k = row.get(key_col, "")
+        v = row.get(value_col, "")
+        if not k or not v:
+            continue
+        try:
+            f = float(v)
+        except ValueError:
+            continue
+        sums[k] = sums.get(k, 0.0) + f
+        counts[k] = counts.get(k, 0) + 1
+    return {k: sums[k] / counts[k] for k in sums}
+
+
+def _bar(data: Dict[str, float], title: str, out_file: Path) -> None:
+    if not data:
+        return
+    labels = list(data.keys())
+    values = [data[k] for k in labels]
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.bar(labels, values)
+    ax.set_title(title)
+    ax.tick_params(axis="x", labelrotation=30)
+    fig.tight_layout()
+    fig.savefig(out_file, dpi=180)
+    plt.close(fig)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate benchmark plots")
+    parser.add_argument("--raw-dir", required=True)
+    parser.add_argument("--out-dir", required=True)
+    args = parser.parse_args()
+
+    raw_dir = Path(args.raw_dir)
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    crypto = _load_rows(raw_dir / "crypto_results.csv")
+    handshake = _load_rows(raw_dir / "handshake_results.csv")
+    oidc = _load_rows(raw_dir / "oidc_results.csv")
+    load = _load_rows(raw_dir / "load_results.csv")
+
+    _bar(_group_avg(crypto, "operation", "latency_us"), "Crypto Latency (us)", out_dir / "crypto_latency.png")
+    _bar(_group_avg(handshake, "scenario", "hct_client_ms"), "Handshake HCT by Scenario (ms)", out_dir / "handshake_hct.png")
+    _bar(_group_avg(oidc, "scenario", "t_auth_total_ms"), "OIDC Total Auth Time by Scenario (ms)", out_dir / "oidc_auth_total.png")
+    _bar(_group_avg(load, "concurrency", "throughput_req_sec"), "Load Throughput by Concurrency", out_dir / "load_throughput.png")
+
+
+if __name__ == "__main__":
+    main()

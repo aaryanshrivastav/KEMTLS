@@ -1,63 +1,78 @@
 #!/bin/bash
-# Setup Network Emulation using tc (Traffic Control) and Netem
-# Requires root privileges (sudo)
+set -euo pipefail
 
-show_help() {
-    echo "Usage: ./setup_netem.sh [OPTIONS]"
-    echo "Options:"
-    echo "  --rtt MS       Round-Trip Time to simulate (default: 31)"
-    echo "  --loss PERCENT Packet loss percentage to simulate (default: 0)"
-    echo "  --reset        Remove all active tc rules on loopback"
-    echo "  --show         Display current tc rules on loopback"
+IFACE="${IFACE:-lo}"
+
+usage() {
+    echo "Usage: $0 apply <scenario>|clear|show"
+    echo "Scenarios: LAN FAST_WAN TYPICAL_WAN SLOW_WAN LOSS_LOW LOSS_HIGH LOSS_SEVERE"
 }
 
-RTT=31
-LOSS=0
-RESET=0
-SHOW=0
+need_tc() {
+    if ! command -v tc >/dev/null 2>&1; then
+        echo "tc not found; netem unsupported on this host"
+        exit 2
+    fi
+}
 
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        --rtt) RTT="$2"; shift ;;
-        --loss) LOSS="$2"; shift ;;
-        --reset) RESET=1 ;;
-        --show) SHOW=1 ;;
-        -h|--help) show_help; exit 0 ;;
-        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+apply_scenario() {
+    local scenario="$1"
+    sudo tc qdisc del dev "$IFACE" root 2>/dev/null || true
+
+    case "$scenario" in
+        LAN)
+            sudo tc qdisc add dev "$IFACE" root netem delay 0.5ms
+            ;;
+        FAST_WAN)
+            sudo tc qdisc add dev "$IFACE" root netem delay 10ms
+            ;;
+        TYPICAL_WAN)
+            sudo tc qdisc add dev "$IFACE" root netem delay 30ms
+            ;;
+        SLOW_WAN)
+            sudo tc qdisc add dev "$IFACE" root netem delay 75ms
+            ;;
+        LOSS_LOW)
+            sudo tc qdisc add dev "$IFACE" root netem delay 30ms loss gemodel 0.5% 20% 80% 0.1%
+            ;;
+        LOSS_HIGH)
+            sudo tc qdisc add dev "$IFACE" root netem delay 30ms loss gemodel 2% 30% 70% 0.5%
+            ;;
+        LOSS_SEVERE)
+            sudo tc qdisc add dev "$IFACE" root netem delay 30ms loss gemodel 5% 40% 60% 1%
+            ;;
+        *)
+            echo "Unknown scenario: $scenario"
+            usage
+            exit 1
+            ;;
     esac
-    shift
-done
+}
 
-# Define interface
-IFACE="lo"
+cmd="${1:-}"
+arg="${2:-}"
 
-if [ "$SHOW" -eq 1 ]; then
-    echo "Current rules on $IFACE:"
-    sudo tc qdisc show dev $IFACE
-    exit 0
-fi
-
-if [ "$RESET" -eq 1 ]; then
-    echo "Resetting tc rules on $IFACE..."
-    sudo tc qdisc del dev $IFACE root 2>/dev/null
-    echo "Done."
-    exit 0
-fi
-
-# Reset existing first to avoid errors
-sudo tc qdisc del dev $IFACE root 2>/dev/null
-
-# Apply delay (half RTT for one-way since it applies both ways on loopback)
-DELAY=$(echo "scale=2; $RTT / 2" | bc)
-
-echo "Applying Netem settings to $IFACE:"
-echo " - One-way Delay (ms): ${DELAY}ms (Total RTT: ${RTT}ms)"
-echo " - Packet Loss (%): $LOSS%"
-
-if [ "$LOSS" != "0" ] && [ "$LOSS" != "0.0" ]; then
-    sudo tc qdisc add dev $IFACE root netem delay ${DELAY}ms loss ${LOSS}%
-else
-    sudo tc qdisc add dev $IFACE root netem delay ${DELAY}ms
-fi
-
-echo "Done. Verify with: ./setup_netem.sh --show"
+case "$cmd" in
+    apply)
+        need_tc
+        if [ -z "$arg" ]; then
+            usage
+            exit 1
+        fi
+        apply_scenario "$arg"
+        echo "[*] Applied netem scenario $arg on $IFACE"
+        ;;
+    clear)
+        need_tc
+        sudo tc qdisc del dev "$IFACE" root 2>/dev/null || true
+        echo "[*] Cleared netem rules on $IFACE"
+        ;;
+    show)
+        need_tc
+        sudo tc qdisc show dev "$IFACE"
+        ;;
+    *)
+        usage
+        exit 1
+        ;;
+esac

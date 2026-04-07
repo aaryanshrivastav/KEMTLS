@@ -1,48 +1,8 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-echo "======================================"
-echo " Starting Research Benchmark Suite"
-echo "======================================"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root_dir="$(cd "$script_dir/../.." && pwd)"
 
-cd "$(dirname "$0")"
-
-# Remove old results
-rm -f *.csv *.json
-rm -f ../analyze/plots/*.png
-
-echo "[*] Collecting System Snapshot..."
-python env_snapshot.py
-
-echo "[*] Running Tier 1 (Crypto)..."
-python run_crypto.py
-
-echo "[*] Running Tier 2 (Handshake)..."
-python run_handshake.py
-
-echo "[*] Running Tier 3 (OIDC)..."
-python run_oidc.py
-
-echo "[*] Running Load Test..."
-python run_load.py
-
-echo ""
-echo "======================================"
-echo " Analyzing Results"
-echo "======================================"
-
-cd ../analyze
-
-echo "[*] Calculating Statistics..."
-python stats.py
-
-echo "[*] Generating Plots..."
-python plots.py
-
-echo ""
-echo "======================================"
-echo " ALL BENCHMARKS COMPLETED!"
-echo " Results available in:"
-echo " - benchmarks/collect/*.csv"
-echo " - benchmarks/analyze/plots/*.png"
-echo "======================================"
+cd "$root_dir"
+python benchmarks/run_benchmarks.py

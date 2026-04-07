@@ -1,0 +1,31 @@
+{
+  "references": [
+    {
+      "id": "schardong_2023_pq_oidc",
+      "source": "Schardong et al.",
+      "year": 2023,
+      "title": "Post-Quantum OIDC",
+      "measured": false,
+      "environment": "paper_reported",
+      "values": {
+        "t_authorize_ms": 41.0,
+        "t_token_ms": 27.0,
+        "t_auth_total_ms": 18.5,
+        "kemtls_handshake_ms": 8.5
+      },
+      "units": "milliseconds"
+    },
+    {
+      "id": "cloudflare_kemtls",
+      "source": "Cloudflare",
+      "year": 2023,
+      "title": "Measuring KEMTLS",
+      "measured": false,
+      "environment": "paper_reported",
+      "values": {
+        "kemtls_handshake_ms": 8.92
+      },
+      "units": "milliseconds"
+    }
+  ]
+}

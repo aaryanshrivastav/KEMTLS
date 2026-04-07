@@ -34,3 +34,7 @@ lerna-debug.log*
 *.sw?
 
 papers
+
+# Benchmark outputs
+benchmarks/results/raw/*
+!benchmarks/results/raw/.gitkeep

@@ -259,6 +259,15 @@ npm run dev
    python scripts/bootstrap_ca.py
    ```
 
+## Benchmark Execution (Real Data)
+
+The benchmark stack runs real cryptographic operations and real KEMTLS/OIDC flows. Synthetic timings are not used.
+
+- Windows to WSL entrypoint: `scripts/run_benchmarks_windows.ps1`
+- WSL loopback runner: `benchmarks/collect/run_all_wsl.sh`
+- Linux netem runner: `benchmarks/collect/run_all_netem.sh`
+- Detailed methodology and outputs: `benchmarks/README.md`
+
 4. **Install frontend dependencies** (for web demo)
    ```bash
    cd frontend

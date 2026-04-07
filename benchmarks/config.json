@@ -1,7 +1,17 @@
 {
-  "runs": 100,
-  "default_rtt_ms": 31,
-  "packet_loss_percent": 0.0,
-  "modes": ["pqtls", "kemtls", "kemtls_pdk"],
-  "results_dir": "results"
+  "environment_profile": "wsl2_loopback",
+  "repeat": 1000,
+  "warmup": 50,
+  "protocols": ["kemtls", "kemtls_pdk"],
+  "suites": ["crypto", "handshake", "oidc", "load"],
+  "scenarios": ["loopback"],
+  "results_dir": "benchmarks/results",
+  "enable_netem": false,
+  "enable_packet_capture": false,
+  "enable_perf": false,
+  "enable_energy": false,
+  "enable_rss": false,
+  "load_concurrency_levels": [1, 5, 10, 25, 50, 100],
+  "token_binding_variant": "session_binding_id",
+  "notes": "Default research benchmark configuration for KEMTLS/OIDC measurement runs."
 }
