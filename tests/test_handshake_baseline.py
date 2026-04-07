@@ -1,58 +1,36 @@
-import hashlib
-from itertools import count
-
 import pytest
 
+from crypto.ml_dsa import MLDSA65
+from crypto.ml_kem import MLKEM768
+from kemtls.certs import create_certificate
 from kemtls.handshake import ClientHandshake, ServerHandshake
-from utils.encoding import base64url_decode
 from utils.serialization import deserialize_message, serialize_message
 
 
-def _install_fake_mlkem(monkeypatch):
-    counter = count(1)
-
-    def fake_generate_keypair():
-        marker = next(counter).to_bytes(1, "big")
-        return marker * 1184, marker * 2400
-
-    def fake_encapsulate(public_key: bytes):
-        marker = public_key[:1]
-        ciphertext = marker * 1088
-        shared_secret = hashlib.sha256(b"ss" + marker).digest()
-        return ciphertext, shared_secret
-
-    def fake_decapsulate(secret_key: bytes, ciphertext: bytes):
-        marker = secret_key[:1]
-        assert ciphertext[:1] == marker
-        return hashlib.sha256(b"ss" + marker).digest()
-
-    monkeypatch.setattr("kemtls.handshake.MLKEM768.generate_keypair", fake_generate_keypair)
-    monkeypatch.setattr("kemtls.handshake.MLKEM768.encapsulate", fake_encapsulate)
-    monkeypatch.setattr("kemtls.handshake.MLKEM768.decapsulate", fake_decapsulate)
-
-
-def _install_fake_certificate_validation(monkeypatch):
-    def fake_validate_certificate(cert, ca_pk, expected_identity):
-        if cert["subject"] != expected_identity:
-            raise ValueError("Identity mismatch")
-        return base64url_decode(cert["kem_public_key"])
-
-    monkeypatch.setattr("kemtls.handshake.validate_certificate", fake_validate_certificate)
+CA_PUBLIC_KEY, CA_SECRET_KEY = MLDSA65.generate_keypair()
+SERVER_LT_PUBLIC_KEY, SERVER_LT_SECRET_KEY = MLKEM768.generate_keypair()
 
 
 def test_baseline_handshake_completes_and_populates_session(monkeypatch):
-    _install_fake_mlkem(monkeypatch)
-    _install_fake_certificate_validation(monkeypatch)
     monkeypatch.setattr("kemtls.handshake.generate_random_string", lambda length: "s" * length)
+
+    cert = create_certificate(
+        subject="server-1",
+        kem_pk=SERVER_LT_PUBLIC_KEY,
+        ca_sk=CA_SECRET_KEY,
+        issuer="Root CA",
+        valid_from=0,
+        valid_to=4_000_000_000,
+    )
 
     server = ServerHandshake(
         server_identity="server-1",
-        server_lt_sk=b"L" * 2400,
-        cert={"subject": "server-1", "kem_public_key": "TA"},
+        server_lt_sk=SERVER_LT_SECRET_KEY,
+        cert=cert,
     )
     client = ClientHandshake(
         expected_identity="server-1",
-        ca_pk=b"C" * 1952,
+        ca_pk=CA_PUBLIC_KEY,
         mode="baseline",
     )
 
@@ -81,18 +59,25 @@ def test_baseline_handshake_completes_and_populates_session(monkeypatch):
 
 
 def test_baseline_handshake_rejects_identity_mismatch(monkeypatch):
-    _install_fake_mlkem(monkeypatch)
-    _install_fake_certificate_validation(monkeypatch)
     monkeypatch.setattr("kemtls.handshake.generate_random_string", lambda length: "s" * length)
+
+    cert = create_certificate(
+        subject="server-1",
+        kem_pk=SERVER_LT_PUBLIC_KEY,
+        ca_sk=CA_SECRET_KEY,
+        issuer="Root CA",
+        valid_from=0,
+        valid_to=4_000_000_000,
+    )
 
     server = ServerHandshake(
         server_identity="server-1",
-        server_lt_sk=b"L" * 2400,
-        cert={"subject": "server-1", "kem_public_key": "TA"},
+        server_lt_sk=SERVER_LT_SECRET_KEY,
+        cert=cert,
     )
     client = ClientHandshake(
         expected_identity="wrong-server",
-        ca_pk=b"C" * 1952,
+        ca_pk=CA_PUBLIC_KEY,
         mode="baseline",
     )
 
@@ -104,18 +89,25 @@ def test_baseline_handshake_rejects_identity_mismatch(monkeypatch):
 
 
 def test_baseline_handshake_rejects_tampered_server_finished(monkeypatch):
-    _install_fake_mlkem(monkeypatch)
-    _install_fake_certificate_validation(monkeypatch)
     monkeypatch.setattr("kemtls.handshake.generate_random_string", lambda length: "s" * length)
+
+    cert = create_certificate(
+        subject="server-1",
+        kem_pk=SERVER_LT_PUBLIC_KEY,
+        ca_sk=CA_SECRET_KEY,
+        issuer="Root CA",
+        valid_from=0,
+        valid_to=4_000_000_000,
+    )
 
     server = ServerHandshake(
         server_identity="server-1",
-        server_lt_sk=b"L" * 2400,
-        cert={"subject": "server-1", "kem_public_key": "TA"},
+        server_lt_sk=SERVER_LT_SECRET_KEY,
+        cert=cert,
     )
     client = ClientHandshake(
         expected_identity="server-1",
-        ca_pk=b"C" * 1952,
+        ca_pk=CA_PUBLIC_KEY,
         mode="baseline",
     )
 

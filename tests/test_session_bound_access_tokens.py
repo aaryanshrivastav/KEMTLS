@@ -1,7 +1,9 @@
-import hashlib
 import time
 from dataclasses import dataclass
 
+import hashlib
+
+from crypto.ml_dsa import MLDSA65
 from oidc.jwt_handler import PQJWT
 from oidc.session_binding import build_access_token_binding_claim, verify_access_token_binding_claim
 from oidc.userinfo_endpoints import UserInfoEndpoint
@@ -14,15 +16,11 @@ class DummySession:
     handshake_mode: str = "baseline"
 
 
+ISSUER_PUBLIC_KEY, ISSUER_SECRET_KEY = MLDSA65.generate_keypair()
+
+
 def _patch_signatures(monkeypatch):
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.sign",
-        lambda _sk, message: hashlib.sha256(message).digest(),
-    )
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.verify",
-        lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
-    )
+    pass
 
 
 def _make_access_token(session):
@@ -35,7 +33,7 @@ def _make_access_token(session):
             "scope": "openid profile email",
             "exp": int(time.time()) + 600,
         },
-        b"issuer-secret-key",
+        ISSUER_SECRET_KEY,
         cnf_claim=build_access_token_binding_claim(session),
     )
 
@@ -52,7 +50,7 @@ def test_session_bound_claim_and_userinfo_reject_replay(monkeypatch):
     original_session = DummySession(b"a" * 32, b"b" * 32)
     replay_session = DummySession(b"z" * 32, b"b" * 32)
     endpoint = UserInfoEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -72,7 +70,7 @@ def test_session_bound_access_tokens_fail_closed_without_session(monkeypatch):
     _patch_signatures(monkeypatch)
     session = DummySession(b"a" * 32, b"b" * 32)
     endpoint = UserInfoEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )

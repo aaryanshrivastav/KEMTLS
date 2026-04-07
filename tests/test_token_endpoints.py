@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import hashlib
 
+from crypto.ml_dsa import MLDSA65
 from oidc.auth_endpoints import AuthorizationEndpoint, InMemoryClientRegistry
 from oidc.jwt_handler import PQJWT
 from oidc.refresh_store import RefreshTokenStore
@@ -22,19 +23,15 @@ class BrokenSession:
     session_binding_id: bytes | None = None
 
 
+ISSUER_PUBLIC_KEY, ISSUER_SECRET_KEY = MLDSA65.generate_keypair()
+
+
 def _code_challenge(verifier: str) -> str:
     return base64url_encode(hashlib.sha256(verifier.encode("ascii")).digest())
 
 
 def _patch_signatures(monkeypatch):
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.sign",
-        lambda _sk, message: hashlib.sha256(message).digest(),
-    )
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.verify",
-        lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
-    )
+    pass
 
 
 def _build_endpoint():
@@ -48,8 +45,8 @@ def _build_endpoint():
     auth = AuthorizationEndpoint(client_registry=registry)
     endpoint = TokenEndpoint(
         issuer_url="https://issuer.example",
-        issuer_sk=b"issuer-secret-key",
-        issuer_pk=b"issuer-public-key",
+        issuer_sk=ISSUER_SECRET_KEY,
+        issuer_pk=ISSUER_PUBLIC_KEY,
         authorization_code_store=auth.code_store,
         refresh_token_store=RefreshTokenStore(),
     )
@@ -87,7 +84,7 @@ def test_authorization_code_exchange_success(monkeypatch):
     jwt = PQJWT()
     id_claims = jwt.validate_id_token(
         response["id_token"],
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
         nonce="nonce123",
@@ -95,7 +92,7 @@ def test_authorization_code_exchange_success(monkeypatch):
     assert id_claims["sub"] == "alice"
     access_claims = jwt.validate_access_token(
         response["access_token"],
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )

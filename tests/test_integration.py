@@ -22,14 +22,7 @@ class DummySession:
 
 
 def _patch_signatures(monkeypatch):
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.sign",
-        lambda _sk, message: hashlib.sha256(message).digest(),
-    )
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.verify",
-        lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
-    )
+    pass
 
 
 def _pkce_challenge(verifier: str) -> str:
@@ -38,14 +31,14 @@ def _pkce_challenge(verifier: str) -> str:
 
 def _build_oidc_app():
     app = Flask(__name__)
-    issuer_public_key = b"P" * MLDSA65.PUBLIC_KEY_SIZE
+    issuer_public_key, issuer_secret_key = MLDSA65.generate_keypair()
     registry = InMemoryClientRegistry(
         {"client123": {"redirect_uris": ["https://client.example/cb"]}}
     )
     auth = AuthorizationEndpoint(client_registry=registry)
     token = TokenEndpoint(
         issuer_url="https://issuer.example",
-        issuer_sk=b"issuer-secret-key",
+        issuer_sk=issuer_secret_key,
         issuer_pk=issuer_public_key,
         authorization_code_store=auth.code_store,
         refresh_token_store=RefreshTokenStore(),
@@ -70,7 +63,6 @@ def _build_oidc_app():
 
 
 def test_end_to_end_oidc_flow_across_modules(monkeypatch):
-    _patch_signatures(monkeypatch)
     _, auth, token, discovery, jwks, introspection, userinfo = _build_oidc_app()
     verifier = "flow-verifier"
     session = DummySession(b"a" * 32, b"b" * 32)
@@ -114,7 +106,6 @@ def test_end_to_end_oidc_flow_across_modules(monkeypatch):
 
 
 def test_route_level_integration_with_session_resolution(monkeypatch):
-    _patch_signatures(monkeypatch)
     app, auth, token, _, jwks, introspection, userinfo = _build_oidc_app()
     jwks.register_routes(app)
     introspection.register_routes(app)
@@ -160,7 +151,6 @@ def test_route_level_integration_with_session_resolution(monkeypatch):
 
 
 def test_cross_module_fail_closed_behavior(monkeypatch):
-    _patch_signatures(monkeypatch)
     _, auth, token, _, _, introspection, userinfo = _build_oidc_app()
     verifier = "flow-verifier"
     session = DummySession(b"a" * 32, b"b" * 32)

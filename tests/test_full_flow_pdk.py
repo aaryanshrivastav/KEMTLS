@@ -15,14 +15,7 @@ class DummySession:
 
 
 def _patch_signatures(monkeypatch):
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.sign",
-        lambda _sk, message: hashlib.sha256(message).digest(),
-    )
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.verify",
-        lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
-    )
+    pass
 
 
 def _challenge(verifier: str) -> str:
@@ -30,12 +23,12 @@ def _challenge(verifier: str) -> str:
 
 
 def test_full_pdk_flow_across_auth_and_resource_servers(monkeypatch):
-    _patch_signatures(monkeypatch)
+    issuer_public_key, issuer_secret_key = MLDSA65.generate_keypair()
     auth_app = create_auth_server_app(
         {
             "issuer": "https://issuer.example",
-            "issuer_public_key": b"P" * MLDSA65.PUBLIC_KEY_SIZE,
-            "issuer_secret_key": b"S" * MLDSA65.SECRET_KEY_SIZE,
+            "issuer_public_key": issuer_public_key,
+            "issuer_secret_key": issuer_secret_key,
             "clients": {"client123": {"redirect_uris": ["https://client.example/cb"]}},
             "demo_user": "alice",
             "introspection_endpoint": "https://issuer.example/introspect",
@@ -45,7 +38,7 @@ def test_full_pdk_flow_across_auth_and_resource_servers(monkeypatch):
     resource_app = create_resource_server_app(
         {
             "issuer": "https://issuer.example",
-            "issuer_public_key": b"P" * MLDSA65.PUBLIC_KEY_SIZE,
+            "issuer_public_key": issuer_public_key,
             "resource_audience": "client123",
         }
     )

@@ -1,4 +1,3 @@
-import hashlib
 from dataclasses import dataclass
 
 from crypto.ml_dsa import MLDSA65
@@ -14,28 +13,25 @@ class DummySession:
     handshake_mode: str = "baseline"
 
 
+ISSUER_PUBLIC_KEY, ISSUER_SECRET_KEY = MLDSA65.generate_keypair()
+
+
 def _patch_signatures(monkeypatch):
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.sign",
-        lambda _sk, message: hashlib.sha256(message).digest(),
-    )
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.verify",
-        lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
-    )
+    pass
 
 
 def _challenge(verifier: str) -> str:
+    import hashlib
+
     return base64url_encode(hashlib.sha256(verifier.encode("ascii")).digest())
 
 
 def test_replay_is_rejected_on_new_session(monkeypatch):
-    _patch_signatures(monkeypatch)
     auth_app = create_auth_server_app(
         {
             "issuer": "https://issuer.example",
-            "issuer_public_key": b"P" * MLDSA65.PUBLIC_KEY_SIZE,
-            "issuer_secret_key": b"S" * MLDSA65.SECRET_KEY_SIZE,
+            "issuer_public_key": ISSUER_PUBLIC_KEY,
+            "issuer_secret_key": ISSUER_SECRET_KEY,
             "clients": {"client123": {"redirect_uris": ["https://client.example/cb"]}},
             "demo_user": "alice",
         }
@@ -43,7 +39,7 @@ def test_replay_is_rejected_on_new_session(monkeypatch):
     resource_app = create_resource_server_app(
         {
             "issuer": "https://issuer.example",
-            "issuer_public_key": b"P" * MLDSA65.PUBLIC_KEY_SIZE,
+            "issuer_public_key": ISSUER_PUBLIC_KEY,
             "resource_audience": "client123",
         }
     )

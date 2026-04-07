@@ -2,6 +2,7 @@ import hashlib
 import time
 from dataclasses import dataclass
 
+from crypto.ml_dsa import MLDSA65
 from flask import Flask
 
 from oidc.introspection_endpoints import IntrospectionEndpoint
@@ -16,15 +17,11 @@ class DummySession:
     handshake_mode: str = "baseline"
 
 
+ISSUER_PUBLIC_KEY, ISSUER_SECRET_KEY = MLDSA65.generate_keypair()
+
+
 def _patch_signatures(monkeypatch):
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.sign",
-        lambda _sk, message: hashlib.sha256(message).digest(),
-    )
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.verify",
-        lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
-    )
+    pass
 
 
 def _make_access_token():
@@ -39,7 +36,7 @@ def _make_access_token():
             "scope": "openid profile",
             "exp": int(time.time()) + 600,
         },
-        b"issuer-secret-key",
+        ISSUER_SECRET_KEY,
         cnf_claim=build_access_token_binding_claim(session),
     )
     return token, session
@@ -49,7 +46,7 @@ def test_introspection_reports_active_token(monkeypatch):
     _patch_signatures(monkeypatch)
     token, _ = _make_access_token()
     endpoint = IntrospectionEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -66,7 +63,7 @@ def test_introspection_reports_binding_status_when_session_is_supplied(monkeypat
     _patch_signatures(monkeypatch)
     token, session = _make_access_token()
     endpoint = IntrospectionEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -84,7 +81,7 @@ def test_introspection_reports_binding_status_when_session_is_supplied(monkeypat
 
 def test_introspection_invalid_token_is_inactive(monkeypatch):
     _patch_signatures(monkeypatch)
-    endpoint = IntrospectionEndpoint(b"issuer-public-key")
+    endpoint = IntrospectionEndpoint(ISSUER_PUBLIC_KEY)
 
     assert endpoint.introspect("bad-token") == {"active": False}
 
@@ -102,11 +99,11 @@ def test_introspection_expired_token_is_inactive(monkeypatch):
             "scope": "openid",
             "exp": int(time.time()) - 10,
         },
-        b"issuer-secret-key",
+        ISSUER_SECRET_KEY,
         cnf_claim=build_access_token_binding_claim(session),
     )
     endpoint = IntrospectionEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -119,7 +116,7 @@ def test_introspection_registers_route(monkeypatch):
     token, session = _make_access_token()
     app = Flask(__name__)
     endpoint = IntrospectionEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -138,7 +135,7 @@ def test_introspection_route_supports_form_and_missing_token(monkeypatch):
     token, _ = _make_access_token()
     app = Flask(__name__)
     endpoint = IntrospectionEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -159,7 +156,7 @@ def test_introspection_route_resolves_session_from_environ(monkeypatch):
     token, session = _make_access_token()
     app = Flask(__name__)
     endpoint = IntrospectionEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )

@@ -8,19 +8,11 @@ from oidc.jwt_handler import PQJWT
 
 
 def _patch_signatures(monkeypatch):
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.sign",
-        lambda _sk, message: hashlib.sha256(message).digest(),
-    )
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.verify",
-        lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
-    )
+    pass
 
 
 def test_discovery_and_jwks_stay_consistent_with_token_headers(monkeypatch):
-    _patch_signatures(monkeypatch)
-    issuer_pk = b"P" * MLDSA65.PUBLIC_KEY_SIZE
+    issuer_pk, issuer_sk = MLDSA65.generate_keypair()
     discovery = DiscoveryEndpoint(
         "https://issuer.example",
         jwks_uri="https://issuer.example/jwks",
@@ -34,7 +26,7 @@ def test_discovery_and_jwks_stay_consistent_with_token_headers(monkeypatch):
             "aud": "client123",
             "exp": int(time.time()) + 600,
         },
-        b"S" * MLDSA65.SECRET_KEY_SIZE,
+        issuer_sk,
         kid="signing-key-1",
     )
 

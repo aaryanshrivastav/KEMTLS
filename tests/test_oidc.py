@@ -18,15 +18,11 @@ class DummySession:
     refresh_binding_id: bytes
     handshake_mode: str = "baseline"
 
+
+ISSUER_PUBLIC_KEY, ISSUER_SECRET_KEY = MLDSA65.generate_keypair()
+
 def _patch_signatures(monkeypatch):
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.sign",
-        lambda _sk, message: hashlib.sha256(message).digest(),
-    )
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.verify",
-        lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
-    )
+    pass
 
 
 def _pkce_challenge(verifier: str) -> str:
@@ -34,20 +30,19 @@ def _pkce_challenge(verifier: str) -> str:
 
 
 def _build_stack():
-    issuer_public_key = b"P" * MLDSA65.PUBLIC_KEY_SIZE
     registry = InMemoryClientRegistry(
         {"client123": {"redirect_uris": ["https://client.example/cb"]}}
     )
     auth = AuthorizationEndpoint(client_registry=registry)
     token = TokenEndpoint(
         issuer_url="https://issuer.example",
-        issuer_sk=b"issuer-secret-key",
-        issuer_pk=issuer_public_key,
+        issuer_sk=ISSUER_SECRET_KEY,
+        issuer_pk=ISSUER_PUBLIC_KEY,
         authorization_code_store=auth.code_store,
         refresh_token_store=RefreshTokenStore(),
         signing_kid="signing-key-1",
     )
-    jwks = JWKSEndpoint({"signing-key-1": issuer_public_key})
+    jwks = JWKSEndpoint({"signing-key-1": ISSUER_PUBLIC_KEY})
     discovery = DiscoveryEndpoint(
         "https://issuer.example",
         jwks_uri="https://issuer.example/jwks",
@@ -57,7 +52,6 @@ def _build_stack():
 
 
 def test_authorization_code_pkce_token_and_metadata_flow(monkeypatch):
-    _patch_signatures(monkeypatch)
     auth, token_endpoint, jwks, discovery = _build_stack()
     verifier = "super-secret-verifier"
 
@@ -85,12 +79,12 @@ def test_authorization_code_pkce_token_and_metadata_flow(monkeypatch):
     jwt = PQJWT()
     id_header, id_claims = jwt.verify_jwt(
         token_response["id_token"],
-        b"P" * MLDSA65.PUBLIC_KEY_SIZE,
+        ISSUER_PUBLIC_KEY,
         expected_type=ID_TOKEN_TYPE,
     )
     access_header, access_claims = jwt.verify_jwt(
         token_response["access_token"],
-        b"P" * MLDSA65.PUBLIC_KEY_SIZE,
+        ISSUER_PUBLIC_KEY,
         expected_type=ACCESS_TOKEN_TYPE,
     )
     jwks_doc = jwks.get_jwks()
@@ -105,7 +99,6 @@ def test_authorization_code_pkce_token_and_metadata_flow(monkeypatch):
 
 
 def test_refresh_rotation_preserves_clean_oidc_shape(monkeypatch):
-    _patch_signatures(monkeypatch)
     auth, token_endpoint, _, _ = _build_stack()
     verifier = "super-secret-verifier"
 
@@ -151,7 +144,6 @@ def test_discovery_advertises_the_supported_oidc_and_kemtls_capabilities():
 
 
 def test_token_lifetimes_are_forward_moving(monkeypatch):
-    _patch_signatures(monkeypatch)
     auth, token_endpoint, _, _ = _build_stack()
     verifier = "super-secret-verifier"
 
@@ -174,7 +166,7 @@ def test_token_lifetimes_are_forward_moving(monkeypatch):
 
     claims = PQJWT().validate_access_token(
         response["access_token"],
-        b"P" * MLDSA65.PUBLIC_KEY_SIZE,
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )

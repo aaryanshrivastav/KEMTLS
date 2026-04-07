@@ -2,6 +2,7 @@ import hashlib
 import time
 from dataclasses import dataclass
 
+from crypto.ml_dsa import MLDSA65
 from flask import Flask
 
 from oidc.jwt_handler import PQJWT
@@ -16,15 +17,11 @@ class DummySession:
     handshake_mode: str = "baseline"
 
 
+ISSUER_PUBLIC_KEY, ISSUER_SECRET_KEY = MLDSA65.generate_keypair()
+
+
 def _patch_signatures(monkeypatch):
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.sign",
-        lambda _sk, message: hashlib.sha256(message).digest(),
-    )
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.verify",
-        lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
-    )
+    pass
 
 
 def _make_access_token(session):
@@ -39,7 +36,7 @@ def _make_access_token(session):
             "email_verified": True,
             "exp": int(time.time()) + 600,
         },
-        b"issuer-secret-key",
+        ISSUER_SECRET_KEY,
         cnf_claim=build_access_token_binding_claim(session),
     )
 
@@ -48,7 +45,7 @@ def test_userinfo_succeeds_on_same_session(monkeypatch):
     _patch_signatures(monkeypatch)
     session = DummySession(b"a" * 32, b"b" * 32)
     endpoint = UserInfoEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -67,7 +64,7 @@ def test_userinfo_rejects_replay_on_new_session(monkeypatch):
     original_session = DummySession(b"a" * 32, b"b" * 32)
     new_session = DummySession(b"z" * 32, b"b" * 32)
     endpoint = UserInfoEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -85,7 +82,7 @@ def test_userinfo_missing_session_fails_closed(monkeypatch):
     _patch_signatures(monkeypatch)
     session = DummySession(b"a" * 32, b"b" * 32)
     endpoint = UserInfoEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -102,7 +99,7 @@ def test_userinfo_registers_both_routes(monkeypatch):
     token = _make_access_token(session)
     app = Flask(__name__)
     endpoint = UserInfoEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -120,7 +117,7 @@ def test_userinfo_registers_both_routes(monkeypatch):
 def test_userinfo_route_rejects_missing_bearer(monkeypatch):
     _patch_signatures(monkeypatch)
     app = Flask(__name__)
-    endpoint = UserInfoEndpoint(b"issuer-public-key")
+    endpoint = UserInfoEndpoint(ISSUER_PUBLIC_KEY)
     endpoint.register_routes(app, get_session=lambda: DummySession(b"a" * 32, b"b" * 32))
 
     response = app.test_client().get("/userinfo")
@@ -132,7 +129,7 @@ def test_userinfo_route_rejects_missing_bearer(monkeypatch):
 def test_userinfo_rejects_invalid_and_expired_tokens(monkeypatch):
     _patch_signatures(monkeypatch)
     endpoint = UserInfoEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -148,7 +145,7 @@ def test_userinfo_rejects_invalid_and_expired_tokens(monkeypatch):
             "scope": "openid",
             "exp": int(time.time()) - 10,
         },
-        b"issuer-secret-key",
+        ISSUER_SECRET_KEY,
         cnf_claim=build_access_token_binding_claim(session),
     )
     expired_payload, expired_status = endpoint.handle_userinfo_request(expired_token, session=session)
@@ -162,7 +159,7 @@ def test_userinfo_rejects_invalid_and_expired_tokens(monkeypatch):
 def test_userinfo_rejects_token_without_binding_claim(monkeypatch):
     _patch_signatures(monkeypatch)
     endpoint = UserInfoEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -176,7 +173,7 @@ def test_userinfo_rejects_token_without_binding_claim(monkeypatch):
             "scope": "openid",
             "exp": int(time.time()) + 600,
         },
-        b"issuer-secret-key",
+        ISSUER_SECRET_KEY,
     )
 
     payload, status = endpoint.handle_userinfo_request(token, session=session)
@@ -191,7 +188,7 @@ def test_userinfo_route_resolves_session_from_environ(monkeypatch):
     token = _make_access_token(session)
     app = Flask(__name__)
     endpoint = UserInfoEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -213,7 +210,7 @@ def test_userinfo_route_fails_closed_without_session_resolution(monkeypatch):
     token = _make_access_token(session)
     app = Flask(__name__)
     endpoint = UserInfoEndpoint(
-        b"issuer-public-key",
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )

@@ -16,22 +16,11 @@ class DummySession:
     handshake_mode: str = "baseline"
 
 
+ISSUER_PUBLIC_KEY, ISSUER_SECRET_KEY = MLDSA65.generate_keypair()
+
+
 def _patch_signatures(monkeypatch):
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.sign",
-        lambda _sk, message: hashlib.sha256(message).digest(),
-    )
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.verify",
-        lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
-    )
-
-
-def _patch_generate_keypair(monkeypatch):
-    monkeypatch.setattr(
-        "servers.auth_server.MLDSA65.generate_keypair",
-        lambda: (b"P" * MLDSA65.PUBLIC_KEY_SIZE, b"S" * MLDSA65.SECRET_KEY_SIZE),
-    )
+    pass
 
 
 def _pkce_challenge(verifier: str) -> str:
@@ -41,8 +30,8 @@ def _pkce_challenge(verifier: str) -> str:
 def _build_auth_config():
     return {
         "issuer": "https://issuer.example",
-        "issuer_public_key": b"P" * MLDSA65.PUBLIC_KEY_SIZE,
-        "issuer_secret_key": b"S" * MLDSA65.SECRET_KEY_SIZE,
+        "issuer_public_key": ISSUER_PUBLIC_KEY,
+        "issuer_secret_key": ISSUER_SECRET_KEY,
         "signing_kid": "signing-key-1",
         "clients": {"client123": {"redirect_uris": ["https://client.example/cb"]}},
         "demo_user": "alice",
@@ -278,7 +267,7 @@ def test_resource_server_app_enforces_session_bound_userinfo(monkeypatch):
     resource_app = create_resource_server_app(
         {
             "issuer": "https://issuer.example",
-            "issuer_public_key": b"P" * MLDSA65.PUBLIC_KEY_SIZE,
+            "issuer_public_key": ISSUER_PUBLIC_KEY,
             "resource_audience": "client123",
         }
     )
@@ -335,7 +324,7 @@ def test_resource_server_app_rejects_missing_bearer_missing_session_and_invalid_
     app = create_resource_server_app(
         {
             "issuer": "https://issuer.example",
-            "issuer_public_key": b"P" * MLDSA65.PUBLIC_KEY_SIZE,
+            "issuer_public_key": ISSUER_PUBLIC_KEY,
             "resource_audience": "client123",
         }
     )
@@ -366,7 +355,7 @@ def test_resource_server_app_supports_api_userinfo_and_active_kemtls_session(mon
     resource_app = create_resource_server_app(
         {
             "issuer": "https://issuer.example",
-            "issuer_public_key": b"P" * MLDSA65.PUBLIC_KEY_SIZE,
+            "issuer_public_key": ISSUER_PUBLIC_KEY,
             "resource_audience": "client123",
         }
     )
@@ -417,7 +406,7 @@ def test_app_factories_expose_expected_extensions(monkeypatch):
     resource_app = create_resource_server_app(
         {
             "issuer": "https://issuer.example",
-            "issuer_public_key": b"P" * MLDSA65.PUBLIC_KEY_SIZE,
+            "issuer_public_key": ISSUER_PUBLIC_KEY,
             "resource_audience": "client123",
         }
     )
@@ -429,10 +418,8 @@ def test_app_factories_expose_expected_extensions(monkeypatch):
 
 def test_compatibility_wrappers_create_working_apps(monkeypatch):
     _patch_signatures(monkeypatch)
-    _patch_generate_keypair(monkeypatch)
-
     auth_server = AuthorizationServer("https://issuer.example")
-    resource_server = ResourceServer(b"P" * MLDSA65.PUBLIC_KEY_SIZE)
+    resource_server = ResourceServer(ISSUER_PUBLIC_KEY)
 
     assert auth_server.app is not None
     assert resource_server.app is not None
@@ -442,16 +429,14 @@ def test_compatibility_wrappers_create_working_apps(monkeypatch):
 
 def test_compatibility_wrappers_accept_config_overrides(monkeypatch):
     _patch_signatures(monkeypatch)
-    _patch_generate_keypair(monkeypatch)
-
     auth_server = AuthorizationServer(
         "https://issuer.example",
         config={"demo_user": "bob", "clients": {"client123": {"redirect_uris": ["https://client.example/cb"]}}},
     )
     resource_server = ResourceServer(
-        b"P" * MLDSA65.PUBLIC_KEY_SIZE,
+        ISSUER_PUBLIC_KEY,
         config={"issuer": "https://issuer.example", "resource_audience": "client123"},
     )
 
     assert auth_server.issuer_url == "https://issuer.example"
-    assert resource_server.issuer_pk == b"P" * MLDSA65.PUBLIC_KEY_SIZE
+    assert resource_server.issuer_pk == ISSUER_PUBLIC_KEY

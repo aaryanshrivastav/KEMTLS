@@ -19,15 +19,11 @@ class DummySession:
     handshake_mode: str = "baseline"
 
 
+ISSUER_PUBLIC_KEY, ISSUER_SECRET_KEY = MLDSA65.generate_keypair()
+
+
 def _patch_signatures(monkeypatch):
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.sign",
-        lambda _sk, message: hashlib.sha256(message).digest(),
-    )
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.verify",
-        lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
-    )
+    pass
 
 
 def _pkce_challenge(verifier: str) -> str:
@@ -42,19 +38,19 @@ def _build_stack():
     auth = AuthorizationEndpoint(client_registry=registry)
     token_endpoint = TokenEndpoint(
         issuer_url="https://issuer.example",
-        issuer_sk=b"issuer-secret-key",
-        issuer_pk=issuer_public_key,
+        issuer_sk=ISSUER_SECRET_KEY,
+        issuer_pk=ISSUER_PUBLIC_KEY,
         authorization_code_store=auth.code_store,
         refresh_token_store=RefreshTokenStore(),
         signing_kid="signing-key-1",
     )
     userinfo = UserInfoEndpoint(
-        issuer_public_key,
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
     introspection = IntrospectionEndpoint(
-        issuer_public_key,
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="client123",
     )
@@ -190,7 +186,7 @@ def test_tampered_and_expired_access_tokens_are_rejected(monkeypatch):
             "scope": "openid",
             "exp": int(time.time()) - 1,
         },
-        b"issuer-secret-key",
+        ISSUER_SECRET_KEY,
         kid="signing-key-1",
         cnf_claim={"cnf": {"kmt": "kemtls-exporter-v1", "kbh": "x"}},
     )
@@ -205,12 +201,12 @@ def test_wrong_audience_is_rejected_across_validation_surfaces(monkeypatch):
     tokens = _issue_tokens(auth, token_endpoint)
 
     wrong_audience_userinfo = UserInfoEndpoint(
-        b"P" * MLDSA65.PUBLIC_KEY_SIZE,
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="wrong-audience",
     )
     wrong_audience_introspection = IntrospectionEndpoint(
-        b"P" * MLDSA65.PUBLIC_KEY_SIZE,
+        ISSUER_PUBLIC_KEY,
         issuer="https://issuer.example",
         audience="wrong-audience",
     )

@@ -1,6 +1,7 @@
 import hashlib
 from dataclasses import dataclass
 
+from crypto.ml_dsa import MLDSA65
 from oidc.auth_endpoints import AuthorizationEndpoint, InMemoryClientRegistry
 from oidc.refresh_store import RefreshTokenStore
 from oidc.session_binding import build_refresh_binding_metadata
@@ -16,14 +17,7 @@ class DummySession:
 
 
 def _patch_signatures(monkeypatch):
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.sign",
-        lambda _sk, message: hashlib.sha256(message).digest(),
-    )
-    monkeypatch.setattr(
-        "oidc.jwt_handler.MLDSA65.verify",
-        lambda _pk, message, signature: signature == hashlib.sha256(message).digest(),
-    )
+    pass
 
 
 def _challenge(verifier: str) -> str:
@@ -31,6 +25,7 @@ def _challenge(verifier: str) -> str:
 
 
 def _build_endpoint():
+    issuer_pk, issuer_sk = MLDSA65.generate_keypair()
     auth = AuthorizationEndpoint(
         client_registry=InMemoryClientRegistry(
             {"client123": {"redirect_uris": ["https://client.example/cb"]}}
@@ -38,8 +33,8 @@ def _build_endpoint():
     )
     token = TokenEndpoint(
         issuer_url="https://issuer.example",
-        issuer_sk=b"issuer-secret-key",
-        issuer_pk=b"issuer-public-key",
+        issuer_sk=issuer_sk,
+        issuer_pk=issuer_pk,
         authorization_code_store=auth.code_store,
         refresh_token_store=RefreshTokenStore(),
     )
@@ -65,7 +60,6 @@ def test_refresh_store_hashes_tokens_and_detects_reuse():
 
 
 def test_refresh_token_rotation_and_replay_failure(monkeypatch):
-    _patch_signatures(monkeypatch)
     auth, token_endpoint = _build_endpoint()
     verifier = "verifier-1"
     auth_result = auth.handle_authorize_request(
@@ -110,7 +104,6 @@ def test_refresh_token_rotation_and_replay_failure(monkeypatch):
 
 
 def test_refresh_token_rotation_rejects_binding_mismatch(monkeypatch):
-    _patch_signatures(monkeypatch)
     auth, token_endpoint = _build_endpoint()
     verifier = "verifier-1"
     auth_result = auth.handle_authorize_request(

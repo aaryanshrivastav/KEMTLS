@@ -3,35 +3,16 @@ import pytest
 from crypto.ml_dsa import MLDSA65
 
 
-class _FakeMLDSABackend:
-    @staticmethod
-    def generate_keypair():
-        return b"P" * MLDSA65.PUBLIC_KEY_SIZE, b"S" * MLDSA65.SECRET_KEY_SIZE
-
-    @staticmethod
-    def sign(secret_key: bytes, message: bytes):
-        marker = message[:1] or b"\x00"
-        return marker + b"\xCC" * (MLDSA65.SIGNATURE_SIZE - 1)
-
-    @staticmethod
-    def verify(public_key: bytes, message: bytes, signature: bytes):
-        return signature == _FakeMLDSABackend.sign(b"", message)
-
-
-def test_sign_verify_roundtrip(monkeypatch):
-    monkeypatch.setattr("crypto.ml_dsa._load_ml_dsa_backend", lambda: _FakeMLDSABackend)
-
-    public_key, secret_key = MLDSA65.generate_keypair()
+def test_sign_verify_roundtrip(mldsa_keypair):
+    public_key, secret_key = mldsa_keypair
     message = b"post-quantum message"
     signature = MLDSA65.sign(secret_key, message)
 
     assert MLDSA65.verify(public_key, message, signature) is True
 
 
-def test_tamper_detection(monkeypatch):
-    monkeypatch.setattr("crypto.ml_dsa._load_ml_dsa_backend", lambda: _FakeMLDSABackend)
-
-    public_key, secret_key = MLDSA65.generate_keypair()
+def test_tamper_detection(mldsa_keypair):
+    public_key, secret_key = mldsa_keypair
     signature = MLDSA65.sign(secret_key, b"original")
 
     assert MLDSA65.verify(public_key, b"tampered", signature) is False

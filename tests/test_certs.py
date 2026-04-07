@@ -5,44 +5,38 @@ import pytest
 from kemtls.certs import create_certificate, validate_certificate
 
 
-def _fake_sign(secret_key: bytes, message: bytes) -> bytes:
-    return hashlib.sha256(secret_key[:1] + message).digest()
-
-
-def _fake_verify(public_key: bytes, message: bytes, signature: bytes) -> bool:
-    return signature == hashlib.sha256(public_key[:1] + message).digest()
-
-
-def test_certificate_roundtrip(monkeypatch):
-    monkeypatch.setattr("kemtls.certs.MLDSA65.sign", _fake_sign)
-    monkeypatch.setattr("kemtls.certs.MLDSA65.verify", _fake_verify)
+def test_certificate_roundtrip(monkeypatch, mldsa_keypair, mlkem_keypair):
     monkeypatch.setattr("kemtls.certs.get_timestamp", lambda: 1_700_000_000)
+
+    ca_pk, ca_sk = mldsa_keypair
+    kem_pk, _ = mlkem_keypair
 
     cert = create_certificate(
         subject="server-1",
-        kem_pk=b"K" * 1184,
-        ca_sk=b"C" * 4032,
+        kem_pk=kem_pk,
+        ca_sk=ca_sk,
         issuer="Root CA",
         valid_from=1_699_999_900,
         valid_to=1_700_000_100,
     )
 
-    kem_pk = validate_certificate(cert, b"C" * 1952, "server-1")
+    validated_kem_pk = validate_certificate(cert, ca_pk, "server-1")
 
     assert cert["issuer"] == "Root CA"
     assert cert["key_usage"] == "kemtls"
-    assert kem_pk == b"K" * 1184
+    assert validated_kem_pk == kem_pk
 
 
-def test_certificate_rejects_wrong_ca_or_tampering(monkeypatch):
-    monkeypatch.setattr("kemtls.certs.MLDSA65.sign", _fake_sign)
-    monkeypatch.setattr("kemtls.certs.MLDSA65.verify", _fake_verify)
+def test_certificate_rejects_wrong_ca_or_tampering(monkeypatch, mldsa_keypair, mlkem_keypair):
     monkeypatch.setattr("kemtls.certs.get_timestamp", lambda: 1_700_000_000)
+
+    ca_pk, ca_sk = mldsa_keypair
+    kem_pk, _ = mlkem_keypair
 
     cert = create_certificate(
         subject="server-1",
-        kem_pk=b"K" * 1184,
-        ca_sk=b"C" * 4032,
+        kem_pk=kem_pk,
+        ca_sk=ca_sk,
         issuer="Root CA",
         valid_from=1_699_999_900,
         valid_to=1_700_000_100,
@@ -54,44 +48,45 @@ def test_certificate_rejects_wrong_ca_or_tampering(monkeypatch):
     tampered = dict(cert)
     tampered["subject"] = "server-2"
     with pytest.raises(ValueError, match="signature verification failed"):
-        validate_certificate(tampered, b"C" * 1952, "server-2")
+        validate_certificate(tampered, ca_pk, "server-2")
 
 
-def test_certificate_rejects_time_window_and_identity_errors(monkeypatch):
-    monkeypatch.setattr("kemtls.certs.MLDSA65.sign", _fake_sign)
-    monkeypatch.setattr("kemtls.certs.MLDSA65.verify", _fake_verify)
+def test_certificate_rejects_time_window_and_identity_errors(monkeypatch, mldsa_keypair, mlkem_keypair):
     monkeypatch.setattr("kemtls.certs.get_timestamp", lambda: 1_700_000_000)
+
+    ca_pk, ca_sk = mldsa_keypair
+    kem_pk, _ = mlkem_keypair
 
     expired = create_certificate(
         subject="server-1",
-        kem_pk=b"K" * 1184,
-        ca_sk=b"C" * 4032,
+        kem_pk=kem_pk,
+        ca_sk=ca_sk,
         issuer="Root CA",
         valid_from=1_699_999_000,
         valid_to=1_699_999_999,
     )
     future = create_certificate(
         subject="server-1",
-        kem_pk=b"K" * 1184,
-        ca_sk=b"C" * 4032,
+        kem_pk=kem_pk,
+        ca_sk=ca_sk,
         issuer="Root CA",
         valid_from=1_700_000_001,
         valid_to=1_700_000_100,
     )
     valid = create_certificate(
         subject="server-1",
-        kem_pk=b"K" * 1184,
-        ca_sk=b"C" * 4032,
+        kem_pk=kem_pk,
+        ca_sk=ca_sk,
         issuer="Root CA",
         valid_from=1_699_999_900,
         valid_to=1_700_000_100,
     )
 
     with pytest.raises(ValueError, match="expired"):
-        validate_certificate(expired, b"C" * 1952, "server-1")
+        validate_certificate(expired, ca_pk, "server-1")
 
     with pytest.raises(ValueError, match="not yet valid"):
-        validate_certificate(future, b"C" * 1952, "server-1")
+        validate_certificate(future, ca_pk, "server-1")
 
     with pytest.raises(ValueError, match="Identity mismatch"):
-        validate_certificate(valid, b"C" * 1952, "wrong-server")
+        validate_certificate(valid, ca_pk, "wrong-server")
