@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 from flask import Flask, g, jsonify, request
 
+from oidc.session_binding import extract_binding_proof_from_headers
 from oidc.auth_endpoints import (
     AuthorizationEndpoint,
     InMemoryAuthorizationCodeStore,
@@ -129,6 +130,7 @@ def create_auth_server_app(
             code_verifier=payload.get("code_verifier"),
             refresh_token=payload.get("refresh_token"),
             session=_resolve_session(),
+            binding_proof=extract_binding_proof_from_headers(request.headers),
         )
         status = 400 if "error" in result else 200
         return jsonify(result), status

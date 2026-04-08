@@ -182,6 +182,43 @@ def test_userinfo_rejects_token_without_binding_claim(monkeypatch):
     assert payload["error"] == "binding_mismatch"
 
 
+def test_userinfo_binding_mismatch_does_not_fallback_to_introspection(monkeypatch):
+    _patch_signatures(monkeypatch)
+
+    class FakeJwtHandler:
+        def __init__(self):
+            self.introspect_called = False
+
+        def validate_access_token(self, *_args, **_kwargs):
+            return {
+                "iss": "https://issuer.example",
+                "sub": "alice",
+                "aud": "client123",
+                "scope": "openid profile email",
+                "email_verified": True,
+                "exp": int(time.time()) + 600,
+                "cnf": {"kmt": "kemtls-exporter-v1", "kbh": "does-not-match"},
+            }
+
+        def introspect(self, *_args, **_kwargs):
+            self.introspect_called = True
+            return {"active": True}
+
+    jwt_handler = FakeJwtHandler()
+    endpoint = UserInfoEndpoint(
+        ISSUER_PUBLIC_KEY,
+        issuer="https://issuer.example",
+        audience="client123",
+        jwt_handler=jwt_handler,
+    )
+
+    payload, status = endpoint.handle_userinfo_request("opaque-token", session=DummySession(b"z" * 32, b"b" * 32))
+
+    assert status == 401
+    assert payload["error"] == "binding_mismatch"
+    assert jwt_handler.introspect_called is False
+
+
 def test_userinfo_route_resolves_session_from_environ(monkeypatch):
     _patch_signatures(monkeypatch)
     session = DummySession(b"a" * 32, b"b" * 32)

@@ -1,6 +1,6 @@
 # Post-Quantum OpenID Connect with KEMTLS
 
-A complete implementation of a post-quantum secure authentication system combining KEMTLS (Key Encapsulation Mechanism Transport Layer Security) with OpenID Connect (OIDC). This project demonstrates quantum-resistant authentication and authorization using NIST-standardized post-quantum cryptographic algorithms, featuring a real-time interactive web-based demonstration with live benchmarking.
+A research prototype of a post-quantum secure authentication system combining KEMTLS (Key Encapsulation Mechanism Transport Layer Security) with OpenID Connect (OIDC). This project demonstrates quantum-resistant authentication and authorization using NIST-standardized post-quantum cryptographic algorithms, featuring a real-time interactive web-based demonstration with live benchmarking.
 
 ## Overview
 
@@ -24,9 +24,8 @@ Unlike traditional TLS which uses digital signatures for server authentication, 
 - Complete quantum-resistance - no classical cryptographic algorithms
 
 ### 🚀 Performance
-- **90% faster** than PQ-TLS-based reference implementations
-- Average end-to-end authentication time: **1.85ms** (vs 18.50ms reference)
-- Optimized cryptographic operations using liboqs
+- Benchmarking framework (results pending verification)
+- Optimized cryptographic operations using liboqs (optional runtime acceleration)
 
 ### 🏗️ Complete Implementation
 - Full KEMTLS handshake protocol
@@ -146,7 +145,6 @@ python scripts/run_kemtls_resource_server.py
 python scripts/step_flow_server.py
 # Starts on http://localhost:5002
 # Orchestrates demo execution and streams events to frontend
-# Runs benchmarks automatically before demo phases
 ```
 
 #### Terminal 4: Frontend Development Server
@@ -161,78 +159,15 @@ npm run dev
 
 1. **Open your browser** to `http://localhost:5173/`
 
-2. **Check connection status*      # Cryptographic primitives
-```
-│   │   ├── ml_kem.py              # ML-KEM-768 operations
-│   │   ├── ml_dsa.py              # ML-DSA-65 signatures
-│   │   ├── aead.py                # ChaCha20-Poly1305 AEAD
-│   │   └── key_schedule.py        # HKDF/key schedule derivation
-│   ├── kemtls/                    # KEMTLS protocol
-│   │   ├── handshake.py           # Handshake protocol
-│   │   ├── channel.py             # Encrypted channel
-│   │   └── session.py             # Session management
-│   ├── oidc/                      # OIDC implementation
-│   │   ├── jwt_handler.py         # PQ-JWT creation/verification
-│   │   ├── authorization.py       # Authorization endpoint
-│   │   ├── token.py               # Token endpoint
-│   │   └── discovery.py           # Discovery endpoint
-│   ├── pop/                       # Proof-of-Possession
-│   │   ├── client.py              # Client-side PoP
-│   │   └── server.py              # Server-side PoP verification
-│   ├── servers/                   # Server implementations
-│   │   ├── auth_server_app.py     # Auth server app factory
-│   │   ├── resource_server_app.py # Resource server app factory
-│   │   ├── auth_server.py         # Compatibility wrapper
-│   │   └── resource_server.py     # Compatibility wrapper
-│   └── client/                    # Client implementation
-│       ├── kemtls_client.py       # KEMTLS client
-│       └── oidc_client.py         # OIDC client logic
-├── scripts/                       # Execution scripts
-│   ├── bootstrap_ca.py            # Generate CA/server keys and certificates
-│   ├── run_kemtls_auth_server.py  # Start KEMTLS authorization server
-│   ├── run_kemtls_resource_server.py # Start KEMTLS resource server
-│   ├── step_flow_server.py        # WebSocket step-flow server (Flask-SocketIO)
-│   ├── demo_full_flow.py          # Run end-to-end demo flow
-│   ├── run_tests.py               # Execute test suite
-│   ├── run_benchmarks.py          # Run all benchmarks
-│   └── __pycache__/               # Python bytecode cache
-├── benchmarks/                    # Benchmarking scripts
-│   ├── crypto_benchmarks.py       # Crypto operation benchmarks
-│   ├── protocol_benchmarks.py     # Protocol-level benchmarks
-│   ├── end_to_end_benchmark.py    # Complete flow benchmarks
-│   └── compare_reference.py       # Compare with PQ-TLS reference
-├── demos/                         # Demo scripts
-│   ├── demo_full_flow.py          # Complete authentication flow
-│   ├── demo_kemtls.py             # KEMTLS handshake only
-│   └── demo_pop.py                # PoP demonstration
-├── frontend/                      # React + TypeScript UI
-│   ├── src/
-│   │   ├── pages/
-│   │   │   └── Index.tsx          # Main demo page
-│   │   ├── components/
-│   │   │   ├── PhaseCard.tsx      # Phase progress cards
-│   │   │   ├── BenchmarkCard.tsx  # Benchmark result cards
-│   │   │   ├── TerminalWindow.tsx # Log display component
-│   │   │   ├── StatusBadge.tsx    # Connection status
-│   │   │   └── ...                # Other UI components
-│   │   ├── hooks/
-│   │   │   └── useDemoWebSocket.ts # WebSocket connection hook
-│   │   └── index.css              # Cyber-themed styling
-│   ├── package.json               # Node dependencies
-│   └── vite.config.ts             # Vite configuration
-├── keys/                          # Generated cryptographic artifacts
-│   ├── ca/
-│   ├── auth_server/
-│   ├── resource_server/
-│   └── pdk/
-├── papers/                        # Research/notes artifacts
-├── tests/                         # Unit and integration tests
-├── results_benchmarks/            # Benchmark results (JSON)
-│   ├── protocol_benchmark_results.json
-│   ├── end_to_end_benchmark_results.json
-│   └── crypto_benchmark_results.json
-└── requirements.txt               # Python dependencie
-```
+2. **Check connection status** in the UI.
+
+3. **Run either Full Flow or Step-by-Step mode** from the frontend controls.
+
+### Disclaimer
+
+- This repository is a research prototype, not a production-ready system.
+- Rust acceleration paths are optional.
+- Performance claims require fresh benchmark runs in your target environment and are pending verification.
 ## Quick Start
 
 ### Prerequisites
@@ -300,16 +235,10 @@ The benchmark stack runs real cryptographic operations and real KEMTLS/OIDC flow
 5. **Open** `http://localhost:5173` **in your browser**
 
 ### Real-Time Benchmarks (50 iterations, displayed in UI)
-The demo automatically runs benchmarks before execution:
-- **KEMTLS Handshake**: ~0.56 ms
-- **ID Token Creation**: ~0.50 ms
-- **Token Verification**: ~0.14 ms
-- **PoP Proof Creation**: ~0.45 ms
-- **PoP Verification**: ~0.12 ms
-- **End-to-End Flow**: ~1.85 ms
+Benchmarking framework is included, but values displayed in the UI should be treated as provisional until fresh runs are produced and verified.
 
 ### Comparison with PQ-TLS Reference
-- **90% improvement** in total authentication time (Kyber768, Dilithium3)
+- Comparative results require fresh, reproducible benchmark runs.
 - ✅ **Token Replay**: PoP with fresh nonces and timestamps
 - ✅ **Token Theft**: Asymmetric PoP binding - token useless without private key
 - ✅ **Man-in-the-Middle**: KEMTLS authenticated channel with KEM-based authentication

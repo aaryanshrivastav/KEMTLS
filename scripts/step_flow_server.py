@@ -8,6 +8,7 @@ protocol code and streams step/log events to the frontend.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import uuid
@@ -34,6 +35,15 @@ from utils.serialization import deserialize_message
 
 
 STEP_ORDER = ["hello", "server", "derive", "finished", "authorize", "account_auth", "consent", "token_exchange", "session_bind", "resource_access"]
+SIMULATION_MODE = os.environ.get("SIMULATION_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+class ResourceServerUnavailableError(RuntimeError):
+    """Raised when the resource server is unreachable and simulation is disabled."""
+
+    def __init__(self):
+        super().__init__("Resource server unavailable")
+        self.payload = {"status": "error", "message": "Resource server unavailable"}
 
 
 @dataclass
@@ -141,6 +151,24 @@ def _emit_log(message: str, level: str = "info") -> None:
     )
 
 
+def _close_active_session() -> None:
+    global _active_session, _active_run_id
+    if _active_session and _active_session.http_client:
+        _active_session.http_client.close()
+    if _active_session and _active_session.resource_http_client:
+        _active_session.resource_http_client.close()
+    _active_session = None
+    _active_run_id = None
+
+
+def _reset_active_run(message: Optional[str] = None) -> None:
+    _close_active_session()
+    if message:
+        _emit_event("step_flow_reset", {"timestamp": _now_ms(), "message": message})
+    else:
+        _emit_event("step_flow_reset", {"timestamp": _now_ms()})
+
+
 def _initialize_state(mode: str, run_id: str, auto_advance: bool = False, client_sid: str = "") -> HandshakeSessionState:
     material = _load_auth_material()
     oidc_runtime = _load_oidc_runtime_config()
@@ -165,6 +193,8 @@ def _initialize_state(mode: str, run_id: str, auto_advance: bool = False, client
         mode=mode,
         keep_alive=True,
     )
+    binding_public_key, binding_secret_key = http_client.get_binding_keypair()
+    resource_http_client.set_binding_keypair(binding_public_key, binding_secret_key)
     resource_url = "kemtls://127.0.0.1:4434/userinfo"
 
     client = ClientHandshake(
@@ -351,6 +381,10 @@ def _run_current_step(state: HandshakeSessionState) -> Dict[str, Any]:
         token_telemetry = state.oidc_client.get_telemetry().get("tokens", [])
         if token_telemetry:
             state.token_transport_binding_id = token_telemetry[-1].get("binding_claim")
+        if state.token_transport_binding_id is None and state.oidc_client.http_client:
+            active_session = getattr(state.oidc_client.http_client.client, "session", None)
+            if active_session is not None:
+                state.token_transport_binding_id = getattr(active_session, "session_binding_id", None)
 
         signature_bytes = _extract_signature_bytes(state.oidc_client.access_token)
         data = {
@@ -369,8 +403,11 @@ def _run_current_step(state: HandshakeSessionState) -> Dict[str, Any]:
 
         cnf = state.token_claims.get("cnf")
         cnf_kbh = cnf.get("kbh") if isinstance(cnf, dict) else None
+        cnf_jwk = cnf.get("jwk") if isinstance(cnf, dict) else None
         token_claim_binding = state.token_claims.get("session_binding_id")
         transport_binding = state.token_transport_binding_id
+        display_token_binding = token_claim_binding
+        display_transport_binding = transport_binding
 
         matched = False
         match_mode = "session_binding_id"
@@ -379,8 +416,24 @@ def _run_current_step(state: HandshakeSessionState) -> Dict[str, Any]:
             expected_kbh = _base64url_nopad(hashlib.sha256(transport_bytes).digest())
             matched = cnf_kbh == expected_kbh
             match_mode = "cnf.kbh"
+            display_token_binding = cnf_kbh
+            display_transport_binding = expected_kbh
+        elif isinstance(cnf_jwk, dict):
+            current_public_key = None
+            if state.oidc_client and state.oidc_client.http_client:
+                current_public_key = state.oidc_client.http_client.binding_public_key
+            claimed_public_key = cnf_jwk.get("x")
+            if current_public_key is not None and isinstance(claimed_public_key, str):
+                matched = base64url_encode(current_public_key) == claimed_public_key
+                match_mode = "cnf.jwk"
+                display_token_binding = claimed_public_key
+                display_transport_binding = base64url_encode(current_public_key)
         else:
-            matched = token_claim_binding == transport_binding
+            matched = (
+                token_claim_binding is not None
+                and transport_binding is not None
+                and token_claim_binding == transport_binding
+            )
 
         if not matched:
             raise RuntimeError("Token contract binding mismatch: token claim does not match KEMTLS session binding")
@@ -388,8 +441,8 @@ def _run_current_step(state: HandshakeSessionState) -> Dict[str, Any]:
         data = {
             "binding_contract": "verified",
             "match_mode": match_mode,
-            "token_claim_binding": _render_binding(token_claim_binding),
-            "transport_binding": _render_binding(transport_binding),
+            "token_claim_binding": _render_binding(display_token_binding),
+            "transport_binding": _render_binding(display_transport_binding),
             "verdict": "session-bound token accepted",
         }
 
@@ -427,17 +480,17 @@ def _run_current_step(state: HandshakeSessionState) -> Dict[str, Any]:
                 pass
 
         if not rs_available:
-            # Resource server not running — simulate successful access for demo.
-            _emit_log("  Resource server unreachable — simulating access for demo continuity", "warning")
+            if not SIMULATION_MODE:
+                raise ResourceServerUnavailableError()
+
+            _emit_log("  Resource server unreachable — simulation mode enabled", "warning")
             binding_id = getattr(state.server_session, "session_binding_id", "") or "demo-binding"
             data = {
-                "endpoint": "/userinfo (simulated)",
-                "status": "200",
-                "outcome": "granted",
-                "server_message": "Access granted — session binding verified",
-                "binding_check": "passed",
+                "endpoint": "/userinfo",
+                "status": "error",
+                "message": "Resource server unavailable",
+                "simulated": True,
                 "rs_binding": _render_binding(binding_id),
-                "note": "Resource server offline — results simulated for walkthrough",
             }
 
     else:
@@ -592,19 +645,19 @@ def _execute_and_advance(state: HandshakeSessionState, step_id: str) -> None:
             _emit_state_snapshot()
     except Exception as exc:
         state.status = "error"
-        if state.http_client:
-            state.http_client.close()
-        if state.resource_http_client:
-            state.resource_http_client.close()
+        error_payload = str(exc)
+        if isinstance(exc, ResourceServerUnavailableError):
+            error_payload = exc.payload
         _emit_event(
             "step_flow_error",
             {
                 "message": f"Step '{step_id}' failed",
-                "error": str(exc),
+                "error": error_payload,
                 "timestamp": _now_ms(),
                 "runId": state.run_id,
             },
         )
+        _reset_active_run("stale session state cleared after step failure")
         _emit_state_snapshot()
 
 
@@ -618,8 +671,9 @@ def on_connect() -> None:
 
 @socketio.on("disconnect")
 def on_disconnect() -> None:
-    # Keep the active state alive across transient polling reconnects.
-    return
+    # Fail closed on disconnect: do not keep an in-memory run alive across
+    # client reconnects, which can otherwise surface stale green-step state.
+    _reset_active_run("client disconnected; cleared active run state")
 
 
 @socketio.on("start_step_flow")
@@ -674,7 +728,6 @@ def on_continue_step_flow(payload: Optional[Dict[str, Any]] = None) -> None:
 
 @socketio.on("reset_step_flow")
 def on_reset_step_flow(payload: Optional[Dict[str, Any]] = None) -> None:
-    global _active_session, _active_run_id
     if _active_session:
         _active_session.client_sid = request.sid
     requested_run_id = (payload or {}).get("runId")
@@ -682,13 +735,7 @@ def on_reset_step_flow(payload: Optional[Dict[str, Any]] = None) -> None:
         _emit_state_snapshot()
         return
 
-    if _active_session and _active_session.http_client:
-        _active_session.http_client.close()
-    if _active_session and _active_session.resource_http_client:
-        _active_session.resource_http_client.close()
-    _active_session = None
-    _active_run_id = None
-    emit("step_flow_reset", {"timestamp": _now_ms()})
+    _reset_active_run()
 
 
 @socketio.on("get_step_flow_state")

@@ -8,6 +8,7 @@ from flask import g, jsonify, request
 
 from oidc.claims import ClaimsProcessor
 from oidc.jwt_handler import PQJWT
+from oidc.session_binding import extract_binding_proof_from_headers
 from oidc.session_binding import verify_access_token_binding_claim
 
 
@@ -33,14 +34,22 @@ class UserInfoEndpoint:
         self,
         access_token: str,
         session=None,
+        *,
+        binding_proof: Optional[Dict[str, Any]] = None,
+        method: str = "GET",
+        path: str = "/userinfo",
         collector: Optional[Any] = None,
     ) -> Tuple[Dict[str, Any], int]:
         if collector:
             collector.start_userinfo_request()
             
         if not isinstance(access_token, str) or not access_token:
+            if collector:
+                collector.end_userinfo_request()
             return {"error": "invalid_token"}, 401
         if session is None:
+            if collector:
+                collector.end_userinfo_request()
             return {"error": "missing_session_context"}, 401
 
         try:
@@ -58,11 +67,19 @@ class UserInfoEndpoint:
             
         import time
         start_binding_ns = time.perf_counter_ns()
-        binding_valid = verify_access_token_binding_claim(claims, session)
+        binding_valid = verify_access_token_binding_claim(
+            claims,
+            session,
+            binding_proof=binding_proof,
+            method=method,
+            path=path,
+        )
         if collector:
             collector.t_binding_verify_ns = time.perf_counter_ns() - start_binding_ns
 
         if not binding_valid:
+            # Security-critical: never allow any fallback path to override
+            # session-binding mismatch for a cryptographically valid token.
             if collector:
                 collector.end_userinfo_request()
             return {"error": "binding_mismatch"}, 401
@@ -104,6 +121,9 @@ class UserInfoEndpoint:
             response, status = self.handle_userinfo_request(
                 token,
                 session=_resolve_session(),
+                binding_proof=extract_binding_proof_from_headers(request.headers),
+                method=request.method,
+                path=request.path,
             )
             return jsonify(response), status
 

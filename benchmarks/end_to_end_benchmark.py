@@ -154,7 +154,6 @@ def benchmark_operation(benchmark: AuthenticationFlowBenchmark, iterations: int 
         "phase1": [],
         "phase2": [],
         "phase3": [],
-        "phase4": [],
         "total": []
     }
     
@@ -219,7 +218,6 @@ def print_summary(results: Dict[str, Any]):
         ("Phase 1: KEMTLS Handshake", "phase1"),
         ("Phase 2: Authorization", "phase2"),
         ("Phase 3: Token Exchange", "phase3"),
-        ("Phase 4: Resource Access", "phase4"),
     ]
     
     total_avg = stats['total']['avg_ms']

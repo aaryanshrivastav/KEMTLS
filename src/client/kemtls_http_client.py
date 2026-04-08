@@ -11,7 +11,9 @@ from typing import Dict, Any, Optional, Tuple
 from urllib.parse import urlparse, urlencode
 from kemtls.client import KEMTLSClient
 from kemtls.pdk import PDKTrustStore
+from oidc.session_binding import build_binding_proof_headers
 from rust_ext import http as rust_http
+from crypto.ml_dsa import MLDSA65
 
 
 class KEMTLSHttpClient:
@@ -27,6 +29,8 @@ class KEMTLSHttpClient:
         expected_identity: str = "server",
         mode: str = "auto",
         keep_alive: bool = False,
+        binding_public_key: Optional[bytes] = None,
+        binding_secret_key: Optional[bytes] = None,
     ):
         """
         Initialize the HTTP client.
@@ -42,6 +46,8 @@ class KEMTLSHttpClient:
         self.expected_identity = expected_identity
         self.mode = mode
         self.keep_alive = keep_alive
+        self.binding_public_key = binding_public_key
+        self.binding_secret_key = binding_secret_key
         
         # Internal transport client
         self.client = KEMTLSClient(
@@ -50,6 +56,20 @@ class KEMTLSHttpClient:
             pdk_store=pdk_store,
             mode=mode
         )
+
+    def _ensure_binding_keypair(self) -> Tuple[bytes, bytes]:
+        if self.binding_public_key is None or self.binding_secret_key is None:
+            self.binding_public_key, self.binding_secret_key = MLDSA65.generate_keypair()
+        return self.binding_public_key, self.binding_secret_key
+
+    def get_binding_keypair(self) -> Tuple[bytes, bytes]:
+        """Return the long-lived client binding keypair used for PoP across servers."""
+        return self._ensure_binding_keypair()
+
+    def set_binding_keypair(self, public_key: bytes, secret_key: bytes) -> None:
+        """Reuse an existing client binding keypair across multiple HTTP clients."""
+        self.binding_public_key = public_key
+        self.binding_secret_key = secret_key
 
     def close(self) -> None:
         """Close any active persistent KEMTLS connection."""
@@ -91,7 +111,8 @@ class KEMTLSHttpClient:
             
         host = parsed.hostname
         port = parsed.port or 4433
-        path = parsed.path or "/"
+        request_path = parsed.path or "/"
+        path = request_path
         if parsed.query:
             path = f"{path}?{parsed.query}"
         
@@ -114,6 +135,12 @@ class KEMTLSHttpClient:
             headers=full_headers,
             body=body,
             keep_alive=self.keep_alive,
+            header_mutator=lambda request_headers, active_session: self._attach_binding_headers(
+                request_headers,
+                active_session,
+                method=method,
+                path=request_path,
+            ),
         )
         
         # Parse Response
@@ -128,6 +155,25 @@ class KEMTLSHttpClient:
         }
         
         return resp_dict
+
+    def _attach_binding_headers(
+        self,
+        headers: Dict[str, str],
+        session,
+        *,
+        method: str,
+        path: str,
+    ) -> None:
+        public_key, secret_key = self._ensure_binding_keypair()
+        headers.update(
+            build_binding_proof_headers(
+                session,
+                public_key,
+                secret_key,
+                method=method,
+                path=path,
+            )
+        )
 
     def _parse_response(self, raw_data: bytes) -> Dict[str, Any]:
         """

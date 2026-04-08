@@ -6,7 +6,7 @@ sends an encrypted HTTP request over a record layer.
 """
 
 import socket
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Callable
 from .handshake import ClientHandshake
 from .record_layer import for_client
 from .pdk import PDKTrustStore
@@ -130,6 +130,7 @@ class KEMTLSClient:
         headers: Optional[Dict[str, str]] = None,
         body: bytes = b"",
         keep_alive: bool = False,
+        header_mutator: Optional[Callable[[Dict[str, str], Any], None]] = None,
     ) -> Tuple[bytes, Any]:
         """
         Connect to a server, perform handshake, and send an encrypted request.
@@ -146,11 +147,15 @@ class KEMTLSClient:
                 self.close()
                 self._open_connection(host, port)
 
+            effective_headers = dict(headers or {})
+            if header_mutator is not None:
+                header_mutator(effective_headers, self.session)
+
             response = self._request_over_active_connection(
                 host,
                 method,
                 path,
-                headers=headers,
+                headers=effective_headers,
                 body=body,
                 keep_alive=keep_alive,
             )

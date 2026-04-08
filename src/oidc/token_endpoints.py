@@ -11,7 +11,9 @@ from oidc.jwt_handler import DEFAULT_KID, PQJWT
 from oidc.refresh_store import RefreshTokenStore
 from oidc.session_binding import (
     build_access_token_binding_claim,
+    build_access_token_pop_claim,
     build_refresh_binding_metadata,
+    verify_binding_proof,
     verify_refresh_binding_metadata,
 )
 from utils.encoding import base64url_encode
@@ -58,6 +60,7 @@ class TokenEndpoint:
         refresh_token: Optional[str] = None,
         session=None,
         code_data: Optional[Dict[str, Any]] = None,
+        binding_proof: Optional[Dict[str, Any]] = None,
         collector: Optional[Any] = None,
         **_: Any,
     ) -> Dict[str, Any]:
@@ -72,6 +75,7 @@ class TokenEndpoint:
                 code_verifier=code_verifier,
                 session=session,
                 code_data=code_data,
+                binding_proof=binding_proof,
                 collector=collector
             )
         elif grant_type == "refresh_token":
@@ -99,6 +103,7 @@ class TokenEndpoint:
         code_verifier: Optional[str],
         session,
         code_data: Optional[Dict[str, Any]],
+        binding_proof: Optional[Dict[str, Any]] = None,
         collector: Optional[Any] = None,
     ) -> Dict[str, Any]:
         if session is None:
@@ -158,7 +163,12 @@ class TokenEndpoint:
             return {"error": "invalid_grant", "error_description": "PKCE verification failed"}
 
         try:
-            return self._issue_authorization_code_tokens(record_data, session, collector=collector)
+            return self._issue_authorization_code_tokens(
+                record_data,
+                session,
+                binding_proof=binding_proof,
+                collector=collector,
+            )
         except ValueError as exc:
             return {"error": "invalid_request", "error_description": str(exc)}
 
@@ -242,6 +252,8 @@ class TokenEndpoint:
         self,
         code_data: Dict[str, Any],
         session,
+        *,
+        binding_proof: Optional[Dict[str, Any]] = None,
         collector: Optional[Any] = None,
     ) -> Dict[str, Any]:
         scopes = code_data["scope"].split()
@@ -270,11 +282,30 @@ class TokenEndpoint:
             kid=self.signing_kid,
             collector=collector
         )
+        if binding_proof is not None:
+            public_key = verify_binding_proof(
+                session,
+                binding_proof,
+                method="POST",
+                path="/token",
+            )
+            if public_key is None:
+                raise ValueError("binding proof verification failed for the active KEMTLS session")
+            access_cnf_claim = build_access_token_pop_claim(public_key)
+        else:
+            try:
+                access_cnf_claim = build_access_token_binding_claim(session)
+            except ValueError as exc:
+                raise ValueError(
+                    "session binding material is missing from the active KEMTLS session"
+                ) from exc
+
         try:
-            access_cnf_claim = build_access_token_binding_claim(session)
             refresh_binding_meta = build_refresh_binding_metadata(session)
-        except ValueError:
-            raise ValueError("session binding material is missing from the active KEMTLS session")
+        except ValueError as exc:
+            raise ValueError(
+                "session binding material is missing from the active KEMTLS session"
+            ) from exc
 
         access_token = self.jwt_handler.create_access_token(
             access_claims,

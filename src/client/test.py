@@ -31,7 +31,7 @@ class DummySession:
 
 
 class FakeTransportClient:
-    def request(self, host, port, method, path, body=b""):
+    def request(self, host, port, method, path, body=b"", **_kwargs):
         if method == "GET":
             raw = (
                 b"HTTP/1.1 200 OK\r\n"
