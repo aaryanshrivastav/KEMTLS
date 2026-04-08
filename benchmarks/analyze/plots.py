@@ -46,6 +46,42 @@ def _bar(data: Dict[str, float], title: str, out_file: Path) -> None:
     plt.close(fig)
 
 
+def _group_avg_expr(rows: List[Dict[str, str]], key_col: str, value_fn) -> Dict[str, float]:
+    sums: Dict[str, float] = {}
+    counts: Dict[str, int] = {}
+    for row in rows:
+        k = row.get(key_col, "")
+        if not k:
+            continue
+        value = value_fn(row)
+        if value is None:
+            continue
+        sums[k] = sums.get(k, 0.0) + value
+        counts[k] = counts.get(k, 0) + 1
+    return {k: sums[k] / counts[k] for k in sums}
+
+
+def _core_auth_value(row: Dict[str, str]):
+    try:
+        return float(row.get("t_authorize_ms", "")) + float(row.get("t_token_ms", ""))
+    except ValueError:
+        return None
+
+
+def _full_cycle_value(row: Dict[str, str]):
+    raw_full = row.get("t_full_cycle_ms")
+    raw_legacy = row.get("t_auth_total_ms")
+    try:
+        if raw_full not in (None, ""):
+            return float(raw_full)
+        if raw_legacy not in (None, ""):
+            # Backward compatibility: old runs stored full-cycle in t_auth_total_ms.
+            return float(raw_legacy)
+    except ValueError:
+        return None
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate benchmark plots")
     parser.add_argument("--raw-dir", required=True)
@@ -67,7 +103,8 @@ def main() -> None:
     oidc_group = "handshake_mode" if oidc and "handshake_mode" in oidc[0] else "scenario"
     load_group = "concurrency"
     _bar(_group_avg(handshake, handshake_group, "hct_client_ms"), "Handshake HCT by Mode (ms)", out_dir / "handshake_hct.png")
-    _bar(_group_avg(oidc, oidc_group, "t_auth_total_ms"), "OIDC Total Auth Time by Mode (ms)", out_dir / "oidc_auth_total.png")
+    _bar(_group_avg_expr(oidc, oidc_group, _core_auth_value), "OIDC Core Auth Time by Mode (ms)", out_dir / "oidc_auth_total.png")
+    _bar(_group_avg_expr(oidc, oidc_group, _full_cycle_value), "OIDC Full Cycle Time by Mode (ms)", out_dir / "oidc_full_cycle.png")
     _bar(_group_avg(load, "concurrency", "throughput_req_sec"), "Load Throughput by Concurrency", out_dir / "load_throughput.png")
     _bar(_group_avg(artifacts, "scenario", "s_id_token_bytes"), "ID Token Size by Mode (bytes)", out_dir / "artifact_id_token_size.png")
 

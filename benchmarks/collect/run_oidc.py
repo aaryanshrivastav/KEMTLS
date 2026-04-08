@@ -164,7 +164,8 @@ def _run_flow(mode: str, stack: BenchmarkStack) -> Dict[str, Any]:
     resource_http.close()
 
     t_login_to_resource_ms = t_discovery_ms + t_authorize_ms + t_token_ms + t_userinfo_ms
-    t_auth_total_ms = t_login_to_resource_ms + t_refresh_ms
+    t_full_cycle_ms = t_login_to_resource_ms + t_refresh_ms
+    t_auth_total_ms = t_authorize_ms + t_token_ms
     tls_hs_ms = auth_handshake_ms + resource_handshake_ms
     s_id_token = str(token_result.get("id_token", ""))
     s_access_token = str(access_token)
@@ -177,6 +178,7 @@ def _run_flow(mode: str, stack: BenchmarkStack) -> Dict[str, Any]:
         "t_userinfo_ms": t_userinfo_ms,
         "t_refresh_ms": t_refresh_ms,
         "t_auth_total_ms": t_auth_total_ms,
+        "t_full_cycle_ms": t_full_cycle_ms,
         "t_login_to_resource_ms": t_login_to_resource_ms,
         "t_tls_hs_ms": tls_hs_ms,
         "t_jwt_sign_ms": float(token_telemetry.get("t_jwt_sign_ms", 0.0)),
@@ -253,6 +255,7 @@ def run_benchmark(config: Dict[str, Any]) -> Path:
                         "t_userinfo_ms": round(float(result["t_userinfo_ms"]), 3),
                         "t_refresh_ms": round(float(result["t_refresh_ms"]), 3),
                         "t_auth_total_ms": round(float(result["t_auth_total_ms"]), 3),
+                        "t_full_cycle_ms": round(float(result["t_full_cycle_ms"]), 3),
                         "t_login_to_resource_ms": round(float(result["t_login_to_resource_ms"]), 3),
                         "t_tls_hs_ms": round(float(result["t_tls_hs_ms"]), 3),
                         "t_jwt_sign_ms": round(float(result["t_jwt_sign_ms"]), 3),
@@ -298,6 +301,7 @@ def run_benchmark(config: Dict[str, Any]) -> Path:
                 "t_userinfo_ms",
                 "t_refresh_ms",
                 "t_auth_total_ms",
+                "t_full_cycle_ms",
                 "t_login_to_resource_ms",
                 "t_tls_hs_ms",
                 "t_jwt_sign_ms",

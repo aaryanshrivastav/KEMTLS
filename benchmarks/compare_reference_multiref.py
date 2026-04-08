@@ -53,16 +53,68 @@ def _mean(rows: List[Dict[str, str]], field: str, *, handshake_mode: Optional[st
     return sum(values) / len(values)
 
 
+def _trim_first_iteration(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Drop the earliest iteration row when possible to reduce cold-start skew."""
+    if len(rows) <= 1:
+        return rows
+
+    def _iteration_value(row: Dict[str, str]) -> int:
+        raw = row.get("iteration", "")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return 0
+
+    first_row = min(rows, key=_iteration_value)
+    first_index = rows.index(first_row)
+    return rows[:first_index] + rows[first_index + 1 :]
+
+
+def _core_auth_mean(rows: List[Dict[str, str]]) -> float:
+    values: List[float] = []
+    for row in rows:
+        try:
+            values.append(float(row.get("t_authorize_ms", "")) + float(row.get("t_token_ms", "")))
+        except (TypeError, ValueError):
+            continue
+    if not values:
+        return 0.0
+    return sum(values) / len(values)
+
+
+def _full_cycle_mean(rows: List[Dict[str, str]]) -> float:
+    values: List[float] = []
+    for row in rows:
+        raw_full = row.get("t_full_cycle_ms", "")
+        raw_legacy = row.get("t_auth_total_ms", "")
+        try:
+            if raw_full not in (None, ""):
+                values.append(float(raw_full))
+            elif raw_legacy not in (None, ""):
+                # Backward compatibility: old runs stored full-cycle in t_auth_total_ms.
+                values.append(float(raw_legacy))
+        except (TypeError, ValueError):
+            continue
+    if not values:
+        return 0.0
+    return sum(values) / len(values)
+
+
 def _local_metrics(raw_dir: Path) -> Dict[str, float]:
     handshake_rows = _load_csv_rows(raw_dir / "handshake_results.csv")
     oidc_rows = _load_csv_rows(raw_dir / "oidc_results.csv")
     crypto_rows = _load_csv_rows(raw_dir / "crypto_results.csv")
+
+    baseline_oidc_rows = [row for row in oidc_rows if row.get("handshake_mode") == "baseline"]
+    baseline_oidc_trimmed = _trim_first_iteration(baseline_oidc_rows)
+
     return {
         "kemtls_handshake_ms": _mean(handshake_rows, "hct_client_ms", handshake_mode="baseline"),
         "kemtls_pdk_handshake_ms": _mean(handshake_rows, "hct_client_ms", handshake_mode="pdk"),
-        "t_authorize_ms": _mean(oidc_rows, "t_authorize_ms", handshake_mode="baseline"),
-        "t_token_ms": _mean(oidc_rows, "t_token_ms", handshake_mode="baseline"),
-        "t_auth_total_ms": _mean(oidc_rows, "t_auth_total_ms", handshake_mode="baseline"),
+        "t_authorize_ms": _mean(baseline_oidc_trimmed, "t_authorize_ms"),
+        "t_token_ms": _mean(baseline_oidc_trimmed, "t_token_ms"),
+        "t_auth_total_ms": _core_auth_mean(baseline_oidc_trimmed),
+        "t_full_cycle_ms": _full_cycle_mean(baseline_oidc_trimmed),
         "crypto_latency_us": _mean(crypto_rows, "latency_us"),
     }
 

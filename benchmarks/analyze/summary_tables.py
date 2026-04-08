@@ -15,6 +15,7 @@ METRIC_COLUMNS = [
     "hct_server_ms",
     "ttfb_ms",
     "t_auth_total_ms",
+    "t_full_cycle_ms",
     "t_token_ms",
     "t_userinfo_ms",
     "throughput_req_sec",
@@ -31,7 +32,35 @@ def _load_csv(path: Path) -> List[Dict[str, str]]:
 
 def _summarize_rows(rows: List[Dict[str, str]]) -> Dict[str, Dict[str, float]]:
     result: Dict[str, Dict[str, float]] = {}
+
+    # Core auth metric is defined as authorize + token; compute from primitives.
+    auth_total_values: List[float] = []
+    for row in rows:
+        try:
+            auth_total_values.append(float(row.get("t_authorize_ms", "")) + float(row.get("t_token_ms", "")))
+        except ValueError:
+            continue
+    if auth_total_values:
+        result["t_auth_total_ms"] = summarize(auth_total_values)
+
+    # Full-cycle metric supports both new schema and legacy runs.
+    full_cycle_values: List[float] = []
+    for row in rows:
+        raw_full = row.get("t_full_cycle_ms")
+        raw_legacy = row.get("t_auth_total_ms")
+        try:
+            if raw_full not in (None, ""):
+                full_cycle_values.append(float(raw_full))
+            elif raw_legacy not in (None, ""):
+                full_cycle_values.append(float(raw_legacy))
+        except ValueError:
+            continue
+    if full_cycle_values:
+        result["t_full_cycle_ms"] = summarize(full_cycle_values)
+
     for col in METRIC_COLUMNS:
+        if col in {"t_auth_total_ms", "t_full_cycle_ms"}:
+            continue
         values: List[float] = []
         for row in rows:
             raw = row.get(col)

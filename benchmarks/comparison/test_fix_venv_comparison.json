@@ -1,12 +1,11 @@
 {
   "local_metrics": {
-    "kemtls_handshake_ms": 7.885528999999999,
-    "kemtls_pdk_handshake_ms": 5.7328090000000005,
-    "t_authorize_ms": 9.114345345345345,
-    "t_token_ms": 18.86303303303303,
-    "t_auth_total_ms": 27.97737837837838,
-    "t_full_cycle_ms": 86.97917717717718,
-    "crypto_latency_us": 621.534775
+    "kemtls_handshake_ms": 0.0,
+    "kemtls_pdk_handshake_ms": 0.0,
+    "t_authorize_ms": 5.395,
+    "t_token_ms": 11.757000000000001,
+    "t_auth_total_ms": 17.1515,
+    "crypto_latency_us": 0.0
   },
   "comparisons": [
     {
@@ -15,8 +14,8 @@
       "year": 2023,
       "metric": "t_authorize_ms",
       "cited_value": 41.0,
-      "local_value": 9.1143,
-      "delta_pct": -77.77,
+      "local_value": 5.395,
+      "delta_pct": -86.84,
       "environment": "paper_reported",
       "measured": false
     },
@@ -26,8 +25,8 @@
       "year": 2023,
       "metric": "t_token_ms",
       "cited_value": 27.0,
-      "local_value": 18.863,
-      "delta_pct": -30.14,
+      "local_value": 11.757,
+      "delta_pct": -56.46,
       "environment": "paper_reported",
       "measured": false
     },
@@ -37,8 +36,8 @@
       "year": 2023,
       "metric": "t_auth_total_ms",
       "cited_value": 18.5,
-      "local_value": 27.9774,
-      "delta_pct": 51.23,
+      "local_value": 17.1515,
+      "delta_pct": -7.29,
       "environment": "paper_reported",
       "measured": false
     },
@@ -48,8 +47,8 @@
       "year": 2023,
       "metric": "kemtls_handshake_ms",
       "cited_value": 8.5,
-      "local_value": 7.8855,
-      "delta_pct": -7.23,
+      "local_value": 0.0,
+      "delta_pct": -100.0,
       "environment": "paper_reported",
       "measured": false
     },
@@ -59,8 +58,8 @@
       "year": 2023,
       "metric": "kemtls_handshake_ms",
       "cited_value": 8.92,
-      "local_value": 7.8855,
-      "delta_pct": -11.6,
+      "local_value": 0.0,
+      "delta_pct": -100.0,
       "environment": "paper_reported",
       "measured": false
     }
