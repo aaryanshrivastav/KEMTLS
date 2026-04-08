@@ -1,26 +1,27 @@
 """
 KEMTLS TCP Server
 
-A multi-threaded TCP server that handles KEMTLS handshakes, 
-transitions to an encrypted record layer, and bridges to a Flask app.
+TCP server plumbing for KEMTLS + HTTP bridge integration.
 """
 
-import socket
+from __future__ import annotations
+
 import signal
+import socket
 import threading
 import traceback
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from flask import Flask
-from .handshake import ServerHandshake
-from .record_layer import for_server
-from ._http_bridge import call_flask_app, parse_http_request
+
+from .tcp_transport import KEMTLSTCPServerConnection, handle_application_session
 
 
 class KEMTLSTCPServer:
     """
-    KEMTLS TCP Server implementation.
+    TCP server wrapper for KEMTLS transport sessions.
     """
-    
+
     def __init__(
         self,
         app: Flask,
@@ -29,7 +30,7 @@ class KEMTLSTCPServer:
         cert: Optional[Dict[str, Any]] = None,
         pdk_key_id: Optional[str] = None,
         host: str = "0.0.0.0",
-        port: int = 4433
+        port: int = 4433,
     ):
         self.app = app
         self.server_identity = server_identity
@@ -52,7 +53,7 @@ class KEMTLSTCPServer:
             pass
 
     def start(self):
-        """Start the server loop."""
+        """Start the TCP accept loop."""
         self.sock.bind((self.host, self.port))
         self.sock.listen(5)
         print(f"KEMTLS Server listening on {self.host}:{self.port}")
@@ -60,6 +61,7 @@ class KEMTLSTCPServer:
         previous_sigterm = None
 
         if threading.current_thread() is threading.main_thread():
+
             def _handle_signal(signum, _frame):
                 print(f"Signal {signum} received. Stopping server...")
                 self.stop()
@@ -70,7 +72,7 @@ class KEMTLSTCPServer:
             if hasattr(signal, "SIGTERM"):
                 previous_sigterm = signal.getsignal(signal.SIGTERM)
                 signal.signal(signal.SIGTERM, _handle_signal)
-        
+
         try:
             while not self._stop_event.is_set():
                 try:
@@ -83,9 +85,9 @@ class KEMTLSTCPServer:
                     raise
 
                 print(f"Accepted connection from {addr}")
-                t = threading.Thread(target=self._handle_client, args=(client_sock,))
-                t.daemon = True
-                t.start()
+                thread = threading.Thread(target=self._handle_client, args=(client_sock,))
+                thread.daemon = True
+                thread.start()
         except KeyboardInterrupt:
             print("Server stopping...")
             self.stop()
@@ -97,88 +99,35 @@ class KEMTLSTCPServer:
                 signal.signal(signal.SIGTERM, previous_sigterm)
 
     def _handle_client(self, client_sock: socket.socket):
-        """Individual client connection handler."""
+        """Handle a single accepted TCP client socket."""
+        connection = KEMTLSTCPServerConnection(client_sock)
         try:
-            # 1. Perform Handshake
             collector = None
             if hasattr(self, "get_collector") and callable(self.get_collector):
                 collector = self.get_collector()
-            
+
             if collector:
                 collector.start_hct()
 
-            handshake = ServerHandshake(
-                self.server_identity,
-                self.server_lt_sk,
-                self.cert,
-                self.pdk_key_id,
-                collector=collector
+            session = connection.complete_handshake(
+                server_identity=self.server_identity,
+                server_lt_sk=self.server_lt_sk,
+                cert=self.cert,
+                pdk_key_id=self.pdk_key_id,
+                collector=collector,
             )
-            
-            # Message 1: ClientHello
-            ch_bytes = self._read_msg(client_sock)
-            sh_bytes = handshake.process_client_hello(ch_bytes)
-            self._send_msg(client_sock, sh_bytes)
-            
-            # Message 2: ClientKeyExchange
-            cke_bytes = self._read_msg(client_sock)
-            sf_bytes = handshake.process_client_key_exchange(cke_bytes)
-            self._send_msg(client_sock, sf_bytes)
-            
-            # Message 3: ClientFinished
-            cf_bytes = self._read_msg(client_sock)
-            session = handshake.verify_client_finished(cf_bytes)
-            
+
             if collector:
                 collector.end_hct()
-                # Server side metrics can be stored elsewhere or returned via a hook
                 if hasattr(self, "on_handshake_complete") and callable(self.on_handshake_complete):
                     self.on_handshake_complete(collector.get_metrics())
-            
+
             print(f"Handshake complete. Mode: {session.handshake_mode}")
-            
-            # 2. Record Layer
-            record_layer = for_server(session, client_sock)
-
-            # 3. Process one or more encrypted HTTP requests on same session.
-            while True:
-                try:
-                    raw_request = record_layer.recv_record()
-                except EOFError:
-                    # Normal disconnect path (e.g., client closes keep-alive socket).
-                    break
-                req = parse_http_request(raw_request)
-                response_bytes = call_flask_app(self.app, session, raw_request)
-                record_layer.send_record(response_bytes)
-
-                connection_header = str(req.get("headers", {}).get("connection", "")).lower()
-                if connection_header == "close":
-                    break
-            
+            handle_application_session(self.app, connection)
         except EOFError:
-            # Treat peer close as a clean shutdown for this connection.
             pass
         except Exception as e:
             print(f"Error handling client: {e!r}")
             traceback.print_exc()
         finally:
-            client_sock.close()
-
-    def _read_msg(self, sock: socket.socket) -> bytes:
-        """Simple length-prefix reader for handshake messages."""
-        header = sock.recv(4)
-        if not header:
-            raise EOFError("Socket closed during handshake")
-        length = int.from_bytes(header, "big")
-        data = b""
-        while len(data) < length:
-            chunk = sock.recv(length - len(data))
-            if not chunk:
-                raise EOFError("Socket closed during handshake data read")
-            data += chunk
-        return data
-
-    def _send_msg(self, sock: socket.socket, msg: bytes):
-        """Simple length-prefix sender for handshake messages."""
-        header = len(msg).to_bytes(4, "big")
-        sock.sendall(header + msg)
+            connection.close()

@@ -19,7 +19,16 @@ Modules:
 
 from .handshake import ClientHandshake, ServerHandshake, KEMTLSHandshake
 from .channel import KEMTLSChannel
-from .record_layer import KEMTLSRecordLayer, for_client, for_server
+from .record_layer import (
+    AEADPacketProtection,
+    KEMTLSRecordLayer,
+    for_client,
+    for_server,
+    frame_tcp_record,
+    parse_tcp_record,
+    protect,
+    unprotect,
+)
 from .session import KEMTLSSession
 from .exporter import (
     derive_exporter_secret,
@@ -27,6 +36,8 @@ from .exporter import (
     derive_refresh_binding_id,
 )
 from .client import KEMTLSClient
+from .transport import KEMTLSTransport
+from .tcp_transport import KEMTLSTCPClientTransport
 
 # Optional dependency: Flask is only required for TCP server integration.
 try:
@@ -39,14 +50,21 @@ __all__ = [
     "ServerHandshake",
     "KEMTLSHandshake",
     "KEMTLSChannel",
+    "AEADPacketProtection",
     "KEMTLSRecordLayer",
     "for_client",
     "for_server",
+    "protect",
+    "unprotect",
+    "frame_tcp_record",
+    "parse_tcp_record",
     "KEMTLSSession",
     "derive_exporter_secret",
     "derive_session_binding_id",
     "derive_refresh_binding_id",
     "KEMTLSClient",
+    "KEMTLSTransport",
+    "KEMTLSTCPClientTransport",
 ]
 
 if KEMTLSTCPServer is not None:

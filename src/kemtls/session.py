@@ -25,3 +25,6 @@ class KEMTLSSession:
 
     session_binding_id: Optional[str] = None
     refresh_binding_id: Optional[str] = None
+
+    transport: Optional[str] = None
+    alpn: Optional[str] = None
