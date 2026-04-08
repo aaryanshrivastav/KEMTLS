@@ -130,6 +130,18 @@ def main() -> None:
         )
         scripts_run.append("run_load.py")
 
+    if "rust_compare" in suites:
+        _run_script(
+            "run_rust_fallback_compare.py",
+            config_path=CONFIG_PATH,
+            results_dir=results_dir,
+            run_id=run_id,
+            environment_profile=environment_profile,
+            repeat=repeat,
+            warmup=warmup,
+        )
+        scripts_run.append("run_rust_fallback_compare.py")
+
     manifest = {
         "run_id": run_id,
         "environment_profile": environment_profile,

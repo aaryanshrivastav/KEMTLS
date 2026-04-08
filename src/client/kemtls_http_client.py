@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional, Tuple
 from urllib.parse import urlparse, urlencode
 from kemtls.client import KEMTLSClient
 from kemtls.pdk import PDKTrustStore
+from rust_ext import http as rust_http
 
 
 class KEMTLSHttpClient:
@@ -133,47 +134,48 @@ class KEMTLSHttpClient:
         Parse HTTP/1.1 response bytes into a dictionary.
         """
         try:
-            # Split headers and body
-            header_end = raw_data.find(b"\r\n\r\n")
-            if header_end == -1:
-                # Malformed response? Try single CRLF if body missing?
-                header_part = raw_data
-                body = b""
-            else:
-                header_part = raw_data[:header_end]
-                body = raw_data[header_end + 4:]
-                
-            header_lines = header_part.decode('ascii').split("\r\n")
-            status_line = header_lines[0].split(" ", 2)
-            
-            status_code = int(status_line[1])
-            status_text = status_line[2] if len(status_line) > 2 else ""
-            
-            headers = {}
-            for line in header_lines[1:]:
-                if ":" in line:
-                    key, val = line.split(":", 1)
-                    headers[key.strip()] = val.strip()
-                    
-            # Try parsing body as JSON if needed
-            parsed_body = body
-            content_type = headers.get('Content-Type', headers.get('content-type', '')).lower()
-            if content_type.startswith('application/json'):
-                try:
-                    parsed_body = json.loads(body.decode('utf-8'))
-                except:
-                    pass
-            elif content_type.startswith('text/'):
-                try:
-                    parsed_body = body.decode('utf-8')
-                except:
-                    pass
-
-            return {
-                'status': status_code,
-                'status_text': status_text,
-                'headers': headers,
-                'body': parsed_body
-            }
+            return rust_http.parse_http_response(raw_data, fallback=self._parse_response_python)
         except Exception as e:
             raise ValueError(f"Failed to parse HTTP response: {e}")
+
+    def _parse_response_python(self, raw_data: bytes) -> Dict[str, Any]:
+        # Split headers and body
+        header_end = raw_data.find(b"\r\n\r\n")
+        if header_end == -1:
+            header_part = raw_data
+            body = b""
+        else:
+            header_part = raw_data[:header_end]
+            body = raw_data[header_end + 4:]
+
+        header_lines = header_part.decode('ascii').split("\r\n")
+        status_line = header_lines[0].split(" ", 2)
+
+        status_code = int(status_line[1])
+        status_text = status_line[2] if len(status_line) > 2 else ""
+
+        headers = {}
+        for line in header_lines[1:]:
+            if ":" in line:
+                key, val = line.split(":", 1)
+                headers[key.strip()] = val.strip()
+
+        parsed_body = body
+        content_type = headers.get('Content-Type', headers.get('content-type', '')).lower()
+        if content_type.startswith('application/json'):
+            try:
+                parsed_body = json.loads(body.decode('utf-8'))
+            except Exception:
+                pass
+        elif content_type.startswith('text/'):
+            try:
+                parsed_body = body.decode('utf-8')
+            except Exception:
+                pass
+
+        return {
+            'status': status_code,
+            'status_text': status_text,
+            'headers': headers,
+            'body': parsed_body,
+        }

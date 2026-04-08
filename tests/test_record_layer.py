@@ -91,3 +91,25 @@ def test_record_layer_raises_on_partial_read():
 
     with pytest.raises(EOFError, match="Connection closed by peer"):
         server.recv_record()
+
+
+def test_send_record_encrypts_once_and_header_matches_ciphertext(monkeypatch):
+    client_sock, server_sock = _socket_pair()
+    client = KEMTLSRecordLayer(_session(), client_sock, is_client=True)
+
+    call_count = {"value": 0}
+
+    def _fake_seal(key, nonce, plaintext, aad):
+        call_count["value"] += 1
+        # Return deterministic ciphertext length = plaintext + tag(16)
+        return b"C" * (len(plaintext) + 16)
+
+    monkeypatch.setattr("kemtls.record_layer.seal", _fake_seal)
+
+    client.send_record(b"hello")
+
+    assert call_count["value"] == 1
+    frame = bytes(server_sock.buffer)
+    assert len(frame) >= 12
+    length = struct.unpack(">I", frame[8:12])[0]
+    assert length == len(frame[12:])

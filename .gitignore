@@ -7,6 +7,16 @@ keys/
 htmlcov/
 .coverage
 
+# Rust
+target/
+rust/**/target/
+Cargo.lock
+*.so
+*.pyd
+*.dll
+*.dylib
+.cargo/
+
 # Node / frontend
 node_modules
 dist

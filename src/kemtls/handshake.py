@@ -8,6 +8,8 @@ supporting both certificate-based (baseline) and pre-distributed key (pdk) authe
 import hmac
 import hashlib
 from typing import Dict, Any, List, Optional, Tuple
+from rust_ext import handshake as rust_handshake
+from rust_ext import hashing as rust_hashing
 from crypto.ml_kem import MLKEM768
 from crypto.ml_kem import KyberKEM
 from crypto.ml_dsa import DilithiumSignature
@@ -44,6 +46,61 @@ def _decode_bytes_field(message: Dict[str, Any], field_name: str) -> bytes:
     raise TypeError(f"{field_name} must be bytes")
 
 
+def _encode_client_hello_python(
+    client_random: str,
+    expected_identity: str,
+    modes: List[str],
+) -> bytes:
+    return serialize_message(
+        {
+            'type': 'ClientHello',
+            'version': 'KEMTLS/1.0',
+            'random': client_random,
+            'modes': modes,
+            'expected_identity': expected_identity,
+        }
+    )
+
+
+def _encode_client_key_exchange_python(ct_eph: bytes, ct_lt: bytes) -> bytes:
+    return serialize_message(
+        {
+            'type': 'ClientKeyExchange',
+            'ct_ephemeral': ct_eph,
+            'ct_longterm': ct_lt,
+        }
+    )
+
+
+def _encode_finished_python(message_type: str, mac: bytes) -> bytes:
+    return serialize_message({'type': message_type, 'mac': mac})
+
+
+def _encode_client_hello(client_random: str, expected_identity: str, modes: List[str]) -> bytes:
+    return rust_handshake.client_hello(
+        client_random,
+        expected_identity,
+        modes,
+        fallback=_encode_client_hello_python,
+    )
+
+
+def _encode_client_key_exchange(ct_eph: bytes, ct_lt: bytes) -> bytes:
+    return rust_handshake.client_key_exchange(
+        ct_eph,
+        ct_lt,
+        fallback=_encode_client_key_exchange_python,
+    )
+
+
+def _encode_finished_message(message_type: str, mac: bytes) -> bytes:
+    return rust_handshake.finished(
+        message_type,
+        mac,
+        fallback=_encode_finished_python,
+    )
+
+
 class ClientHandshake:
     """
     Client-side KEMTLS handshake state machine.
@@ -74,14 +131,7 @@ class ClientHandshake:
     def client_hello(self) -> bytes:
         """Generate ClientHello."""
         supported_modes = ["baseline", "pdk"] if self.mode == "auto" else [self.mode]
-        ch = {
-            'type': 'ClientHello',
-            'version': 'KEMTLS/1.0',
-            'random': self.client_random,
-            'modes': supported_modes,
-            'expected_identity': self.expected_identity
-        }
-        msg = serialize_message(ch)
+        msg = _encode_client_hello(self.client_random, self.expected_identity, supported_modes)
         if self.collector:
             self.collector.client_hello_size = len(msg)
         self.transcript.append(msg)
@@ -134,12 +184,7 @@ class ClientHandshake:
         ct_eph, self.ss_eph = MLKEM768.encapsulate(server_eph_pk)
         ct_lt, self.ss_lt = MLKEM768.encapsulate(server_lt_pk)
         
-        cke = {
-            'type': 'ClientKeyExchange',
-            'ct_ephemeral': ct_eph,
-            'ct_longterm': ct_lt
-        }
-        msg = serialize_message(cke)
+        msg = _encode_client_key_exchange(ct_eph, ct_lt)
         if self.collector:
             self.collector.client_finish_size = len(msg)
         self.transcript.append(msg)
@@ -175,7 +220,11 @@ class ClientHandshake:
         
         # Verify MAC
         server_mac = _decode_bytes_field(sf, 'mac')
-        expected_mac = hmac.new(self.server_fin_key, t1, hashlib.sha256).digest()
+        expected_mac = rust_handshake.hmac_sha256(
+            self.server_fin_key,
+            t1,
+            fallback=_hmac_sha256_python,
+        )
         if server_mac != expected_mac:
             raise ValueError("ServerFinished MAC verification failed")
             
@@ -219,11 +268,18 @@ class ClientHandshake:
     def client_finished(self) -> bytes:
         """Generate ClientFinished."""
         t2 = compute_transcript_hash(self.transcript[:3])
-        mac = hmac.new(self.client_fin_key, t2, hashlib.sha256).digest()
-        cf = {'type': 'ClientFinished', 'mac': mac}
-        msg = serialize_message(cf)
+        mac = rust_handshake.hmac_sha256(
+            self.client_fin_key,
+            t2,
+            fallback=_hmac_sha256_python,
+        )
+        msg = _encode_finished_message('ClientFinished', mac)
         self.transcript.append(msg)
         return msg
+
+
+def _hmac_sha256_python(key: bytes, data: bytes) -> bytes:
+    return hmac.new(key, data, hashlib.sha256).digest()
 
 
 class ServerHandshake:
@@ -314,9 +370,12 @@ class ServerHandshake:
         self.server_fin_key = fin_keys['server_finished_key']
         
         # 3. Generate ServerFinished
-        mac = hmac.new(self.server_fin_key, t1, hashlib.sha256).digest()
-        sf = {'type': 'ServerFinished', 'mac': mac}
-        msg = serialize_message(sf)
+        mac = rust_handshake.hmac_sha256(
+            self.server_fin_key,
+            t1,
+            fallback=_hmac_sha256_python,
+        )
+        msg = _encode_finished_message('ServerFinished', mac)
         if self.collector:
             self.collector.server_finish_size = len(msg)
         self.transcript.append(msg)
@@ -328,7 +387,11 @@ class ServerHandshake:
         cf = deserialize_message(msg_bytes)
         
         client_mac = _decode_bytes_field(cf, 'mac')
-        if hmac.new(self.client_fin_key, t2, hashlib.sha256).digest() != client_mac:
+        if rust_handshake.hmac_sha256(
+            self.client_fin_key,
+            t2,
+            fallback=_hmac_sha256_python,
+        ) != client_mac:
             raise ValueError("ClientFinished MAC verification failed")
             
         self.transcript.append(msg_bytes)
@@ -403,7 +466,10 @@ class KEMTLSHandshake:
 
         self.client_ephemeral_pk = base64url_decode(client_key_exchange["client_ephemeral_pk"])
 
-        transcript_hash = hashlib.sha256(self.transcript).digest()
+        transcript_hash = rust_hashing.sha256_digest(
+            self.transcript,
+            fallback=lambda data: hashlib.sha256(data).digest(),
+        )
         self.session_keys = KeyDerivation.derive_session_keys([ss_eph, ss_lt], transcript_hash)
         return self.session_keys
 
@@ -437,7 +503,10 @@ class KEMTLSHandshake:
 
         self.transcript += serialize_message(client_key_exchange)
 
-        transcript_hash = hashlib.sha256(self.transcript).digest()
+        transcript_hash = rust_hashing.sha256_digest(
+            self.transcript,
+            fallback=lambda data: hashlib.sha256(data).digest(),
+        )
         self.session_keys = KeyDerivation.derive_session_keys([ss_eph, ss_lt], transcript_hash)
         return client_key_exchange, client_eph_pk
 

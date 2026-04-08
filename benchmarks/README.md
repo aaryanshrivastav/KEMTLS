@@ -30,6 +30,24 @@ bash benchmarks/collect/run_all_wsl.sh --profile wsl2_loopback --suites crypto,h
 bash benchmarks/collect/run_all_netem.sh --profile linux_netem --scenario-set all --suites crypto,handshake,oidc,load
 ```
 
+### Rust vs Python fallback validation
+
+Run from repository root:
+
+```bash
+python benchmarks/collect/run_rust_fallback_compare.py --repeat 120 --warmup 15
+```
+
+This collector reports both:
+
+- direct per-call comparison (`comparison`)
+- amortized batched comparison (`comparison_batched`) to reduce microbench FFI bias
+
+It writes:
+
+- `benchmarks/results/raw/<run_id>/rust_fallback_compare.json`
+- `benchmarks/results/raw/<run_id>/rust_fallback_compare.csv`
+
 ## Output Layout
 
 - Raw: `benchmarks/results/raw/<run_id>/`

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+from rust_ext import aead as rust_aead
+
 KEY_SIZE = 32
 NONCE_SIZE = 12
 TAG_SIZE = 16
@@ -42,8 +44,7 @@ def seal(key: bytes, nonce: bytes, plaintext: bytes, aad: bytes) -> bytes:
     _validate_bytes("plaintext", plaintext)
     _validate_bytes("aad", aad)
 
-    chacha20_poly1305 = _load_chacha20_poly1305()
-    return chacha20_poly1305(key).encrypt(nonce, plaintext, aad)
+    return rust_aead.seal(key, nonce, plaintext, aad, fallback=_seal_python)
 
 
 def open_(key: bytes, nonce: bytes, ciphertext: bytes, aad: bytes) -> bytes:
@@ -57,11 +58,7 @@ def open_(key: bytes, nonce: bytes, ciphertext: bytes, aad: bytes) -> bytes:
             f"ciphertext must be at least {TAG_SIZE} bytes to include an authentication tag"
         )
 
-    try:
-        chacha20_poly1305 = _load_chacha20_poly1305()
-        return chacha20_poly1305(key).decrypt(nonce, ciphertext, aad)
-    except Exception as exc:
-        raise ValueError("authentication tag verification failed") from exc
+    return rust_aead.open(key, nonce, ciphertext, aad, fallback=_open_python)
 
 
 def xor_iv_with_seq(iv: bytes, seq: int) -> bytes:
@@ -72,6 +69,23 @@ def xor_iv_with_seq(iv: bytes, seq: int) -> bytes:
     if seq < 0 or seq >= 1 << 64:
         raise ValueError("seq must be between 0 and 2^64 - 1")
 
+    return rust_aead.xor_iv_with_seq(iv, seq, fallback=_xor_iv_with_seq_python)
+
+
+def _seal_python(key: bytes, nonce: bytes, plaintext: bytes, aad: bytes) -> bytes:
+    chacha20_poly1305 = _load_chacha20_poly1305()
+    return chacha20_poly1305(key).encrypt(nonce, plaintext, aad)
+
+
+def _open_python(key: bytes, nonce: bytes, ciphertext: bytes, aad: bytes) -> bytes:
+    try:
+        chacha20_poly1305 = _load_chacha20_poly1305()
+        return chacha20_poly1305(key).decrypt(nonce, ciphertext, aad)
+    except Exception as exc:
+        raise ValueError("authentication tag verification failed") from exc
+
+
+def _xor_iv_with_seq_python(iv: bytes, seq: int) -> bytes:
     seq_bytes = seq.to_bytes(8, "big")
     padded_seq = b"\x00" * (NONCE_SIZE - len(seq_bytes)) + seq_bytes
     return bytes(left ^ right for left, right in zip(iv, padded_seq))

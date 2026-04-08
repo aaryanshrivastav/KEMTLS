@@ -6,6 +6,8 @@ import hashlib
 import hmac
 from typing import Dict, Sequence
 
+from rust_ext import key_schedule as rust_key_schedule
+
 
 HASH_NAME = "sha256"
 HASH_LEN = hashlib.new(HASH_NAME).digest_size
@@ -16,7 +18,7 @@ def hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
     """HKDF-Extract using SHA-256."""
     _validate_bytes("salt", salt)
     _validate_bytes("ikm", ikm)
-    return hmac.new(salt, ikm, HASH_NAME).digest()
+    return rust_key_schedule.hkdf_extract(salt, ikm, fallback=_hkdf_extract_python)
 
 
 def hkdf_expand_label(secret: bytes, label: bytes, context: bytes, length: int) -> bytes:
@@ -44,12 +46,15 @@ def compute_transcript_hash(messages: Sequence[bytes]) -> bytes:
     """Hash an ordered transcript of canonical handshake messages."""
     if not isinstance(messages, Sequence):
         raise TypeError("messages must be a sequence of bytes values")
-    hasher = hashlib.sha256()
+    chunks = []
     for index, message in enumerate(messages):
         if not isinstance(message, bytes):
             raise TypeError(f"transcript message {index} must be bytes")
-        hasher.update(message)
-    return hasher.digest()
+        chunks.append(message)
+    return rust_key_schedule.transcript_hash_many(
+        chunks,
+        fallback=_transcript_hash_many_python,
+    )
 
 
 def derive_handshake_secret(shared_secrets: Sequence[bytes]) -> bytes:
@@ -125,6 +130,28 @@ def _validate_bytes(name: str, value: bytes, expected_length: int | None = None)
 
 
 def _hkdf_expand(prk: bytes, info: bytes, length: int) -> bytes:
+    if length > 255 * HASH_LEN:
+        raise ValueError("length exceeds HKDF expand limit")
+
+    return rust_key_schedule.hkdf_expand(prk, info, length, fallback=_hkdf_expand_python)
+
+
+def _hkdf_extract_python(salt: bytes, ikm: bytes) -> bytes:
+    return hmac.new(salt, ikm, HASH_NAME).digest()
+
+
+def _transcript_hash_python(data: bytes) -> bytes:
+    return hashlib.sha256(data).digest()
+
+
+def _transcript_hash_many_python(messages: list[bytes]) -> bytes:
+    hasher = hashlib.sha256()
+    for message in messages:
+        hasher.update(message)
+    return hasher.digest()
+
+
+def _hkdf_expand_python(prk: bytes, info: bytes, length: int) -> bytes:
     if length > 255 * HASH_LEN:
         raise ValueError("length exceeds HKDF expand limit")
 
