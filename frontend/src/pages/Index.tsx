@@ -272,7 +272,9 @@ export default function Index() {
   // Step-by-step backend connection (Socket.IO)
   useEffect(() => {
     const socket = io(SOCKET_URL, {
-      transports: ['polling'],
+      transports: ['websocket', 'polling'],
+      upgrade: true,
+      rememberUpgrade: true,
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
