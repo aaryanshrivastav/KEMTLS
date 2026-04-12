@@ -81,8 +81,8 @@ export function Sidebar({ onRunFlow, onPauseFlow, onResetFlow, flowState, metric
               <span className="text-text-primary font-mono text-xs">api.example.com</span>
             </div>
             <div className="flex justify-between items-center text-text-secondary">
-              <span>Session Lifetime</span>
-              <span className="text-text-primary font-mono text-xs">10m</span>
+              <span>Session Policy</span>
+              <span className="text-text-primary font-mono text-xs">channel-bound</span>
             </div>
             <div className="flex justify-between items-center text-text-secondary">
               <span>Enable PKCE</span>
@@ -95,7 +95,7 @@ export function Sidebar({ onRunFlow, onPauseFlow, onResetFlow, flowState, metric
         <section>
           <h3 className="text-xs font-bold text-text-tertiary mb-3 tracking-wider">LIVE METRICS</h3>
           <div className="space-y-3">
-            <MetricCard label="Handshake Latency" value={`${metrics.handshakeLatency}ms`} trend="down" status="success" />
+            <MetricCard label="Handshake Status" value="Verified" status="success" />
             <MetricCard label="Token Size" value={`${metrics.tokenSize}KB`} trend="up" status="warning" />
             <MetricCard label="Active Sessions" value={metrics.sessions} />
           </div>
@@ -112,9 +112,6 @@ export function Sidebar({ onRunFlow, onPauseFlow, onResetFlow, flowState, metric
                   ${log.status === 'success' ? 'border-success' : log.status === 'error' ? 'border-error' : 'border-info'}`
                 }
               >
-                <div className="text-[10px] text-text-tertiary mb-1">
-                  {log.timestamp.toLocaleTimeString([], { hour12: false })}
-                </div>
                 <div className="text-text-secondary break-words">
                   {log.message}
                 </div>

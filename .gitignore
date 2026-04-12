@@ -6,6 +6,7 @@ keys/
 .vscode
 htmlcov/
 .coverage
+benchmarks/comparison
 
 # Rust
 target/
@@ -48,3 +49,9 @@ papers
 # Benchmark outputs
 benchmarks/results/raw/*
 !benchmarks/results/raw/.gitkeep
+benchmarks/results/presentation_metrics.json
+results/
+results_benchmarks/
+.pytest_cache/
+test_output.txt
+results.txt

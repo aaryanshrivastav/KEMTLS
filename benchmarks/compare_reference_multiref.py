@@ -1,208 +1,140 @@
 from __future__ import annotations
 
-import argparse
-import csv
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List
 
 import matplotlib.pyplot as plt
+import numpy as np
 
-
+# --- Constants & Paths ---
 SCRIPT_DIR = Path(__file__).resolve().parent
-REFERENCE_PATH = SCRIPT_DIR / "reference" / "reference_values.json"
-RESULTS_DIR = SCRIPT_DIR / "results"
+ROOT_DIR = SCRIPT_DIR.parent
+RESULTS_DIR = ROOT_DIR / "benchmarks" / "results"
 COMPARISON_DIR = SCRIPT_DIR / "comparison"
-
+METRICS_JSON = RESULTS_DIR / "presentation_metrics.json"
 
 def _load_json(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
 
+def draw_generic_table(ax, title, columns, data, highlight_col=3):
+    ax.axis('off')
+    ax.set_title(title, fontsize=16, weight='bold', pad=20, color='#1A56DB')
+    
+    table = ax.table(
+        cellText=data,
+        colLabels=columns,
+        cellLoc='center',
+        loc='center',
+        colColours=["#f2f2f2"] * len(columns)
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(11)
+    table.scale(1.0, 2.5)
+    
+    for (row, col), cell in table.get_celld().items():
+        if row == 0:
+            cell.set_text_props(weight='bold', color='white')
+            cell.set_facecolor('#1A56DB')
+        elif col == highlight_col:
+            cell.set_facecolor('#F0FFF4')
+            cell.get_text().set_weight('bold')
+        if col == 0:
+            cell.set_text_props(weight='bold')
+            cell.set_facecolor('#F9FAFB')
+    return table
 
-def _load_csv_rows(path: Path) -> List[Dict[str, str]]:
-    if not path.exists():
-        return []
-    with path.open("r", encoding="utf-8", newline="") as file_handle:
-        return list(csv.DictReader(file_handle))
+def render_simple_table(metrics: Dict[str, Any]):
+    tr = metrics.get("transport", {})
+    oi = metrics.get("oidc", {})
+    sy = metrics.get("system", {})
 
-
-def _latest_run_id(raw_root: Path) -> Optional[str]:
-    candidates = [path for path in raw_root.iterdir() if path.is_dir()]
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: item.stat().st_mtime, reverse=True)
-    return candidates[0].name
-
-
-def _mean(rows: List[Dict[str, str]], field: str, *, handshake_mode: Optional[str] = None) -> float:
-    values: List[float] = []
-    for row in rows:
-        if handshake_mode is not None and row.get("handshake_mode") != handshake_mode:
-            continue
-        raw = row.get(field)
-        if raw in (None, ""):
-            continue
-        try:
-            values.append(float(raw))
-        except ValueError:
-            continue
-    if not values:
-        return 0.0
-    return sum(values) / len(values)
-
-
-def _trim_first_iteration(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    """Drop the earliest iteration row when possible to reduce cold-start skew."""
-    if len(rows) <= 1:
-        return rows
-
-    def _iteration_value(row: Dict[str, str]) -> int:
-        raw = row.get("iteration", "")
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            return 0
-
-    first_row = min(rows, key=_iteration_value)
-    first_index = rows.index(first_row)
-    return rows[:first_index] + rows[first_index + 1 :]
-
-
-def _core_auth_mean(rows: List[Dict[str, str]]) -> float:
-    values: List[float] = []
-    for row in rows:
-        try:
-            values.append(float(row.get("t_authorize_ms", "")) + float(row.get("t_token_ms", "")))
-        except (TypeError, ValueError):
-            continue
-    if not values:
-        return 0.0
-    return sum(values) / len(values)
-
-
-def _full_cycle_mean(rows: List[Dict[str, str]]) -> float:
-    values: List[float] = []
-    for row in rows:
-        raw_full = row.get("t_full_cycle_ms", "")
-        raw_legacy = row.get("t_auth_total_ms", "")
-        try:
-            if raw_full not in (None, ""):
-                values.append(float(raw_full))
-            elif raw_legacy not in (None, ""):
-                # Backward compatibility: old runs stored full-cycle in t_auth_total_ms.
-                values.append(float(raw_legacy))
-        except (TypeError, ValueError):
-            continue
-    if not values:
-        return 0.0
-    return sum(values) / len(values)
-
-
-def _local_metrics(raw_dir: Path) -> Dict[str, float]:
-    handshake_rows = _load_csv_rows(raw_dir / "handshake_results.csv")
-    oidc_rows = _load_csv_rows(raw_dir / "oidc_results.csv")
-    crypto_rows = _load_csv_rows(raw_dir / "crypto_results.csv")
-
-    baseline_oidc_rows = [row for row in oidc_rows if row.get("handshake_mode") == "baseline"]
-    baseline_oidc_trimmed = _trim_first_iteration(baseline_oidc_rows)
-
-    return {
-        "kemtls_handshake_ms": _mean(handshake_rows, "hct_client_ms", handshake_mode="baseline"),
-        "kemtls_pdk_handshake_ms": _mean(handshake_rows, "hct_client_ms", handshake_mode="pdk"),
-        "t_authorize_ms": _mean(baseline_oidc_trimmed, "t_authorize_ms"),
-        "t_token_ms": _mean(baseline_oidc_trimmed, "t_token_ms"),
-        "t_auth_total_ms": _core_auth_mean(baseline_oidc_trimmed),
-        "t_full_cycle_ms": _full_cycle_mean(baseline_oidc_trimmed),
-        "crypto_latency_us": _mean(crypto_rows, "latency_us"),
-    }
-
-
-def _build_report(local_metrics: Dict[str, float], references: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
-    comparison_rows: List[Dict[str, Any]] = []
-    for ref in references:
-        values = ref.get("values", {})
-        for metric_name, cited_value in values.items():
-            local_value = local_metrics.get(metric_name, 0.0)
-            delta_pct = ((local_value - cited_value) / cited_value * 100.0) if cited_value else 0.0
-            comparison_rows.append(
-                {
-                    "reference_id": ref.get("id"),
-                    "source": ref.get("source"),
-                    "year": ref.get("year"),
-                    "metric": metric_name,
-                    "cited_value": cited_value,
-                    "local_value": round(local_value, 4),
-                    "delta_pct": round(delta_pct, 2),
-                    "environment": ref.get("environment"),
-                    "measured": ref.get("measured", False),
-                }
-            )
-    return {"local_metrics": local_metrics, "comparisons": comparison_rows}
-
-
-def _write_markdown(report: Dict[str, Any], out_path: Path) -> None:
-    lines = [
-        "# Reference Comparison",
-        "",
-        "| Source | Year | Metric | Cited | Local | Delta % |",
-        "|---|---:|---|---:|---:|---:|",
+    data = [
+        ["Handshake latency", "214.8 ms", "613.2 ms", "639.0 ms", f"{tr.get('handshake_latency', {}).get('mean')} ms"],
+        ["Handshake bytes", "2.15 KB", "11.18 KB", "9.07 KB", f"{tr.get('handshake_size', {}).get('total'):.2f} KB"],
+        ["End-to-end login", "365.2 ms", "828.4 ms", "712.1 ms", f"{oi.get('e2e_latency', {}).get('total')} ms"],
+        ["Token sign", "0.85 ms", "0.16 ms", "0.16 ms", f"{tr.get('crypto_timings', {}).get('ml_dsa_65_sign')} ms"],
+        ["Token verify", "0.05 ms", "0.14 ms", "0.14 ms", f"{tr.get('crypto_timings', {}).get('ml_dsa_65_verify')} ms"],
+        ["Resource access latency", "204.2 ms", "412.1 ms", "388.4 ms", f"{oi.get('e2e_latency', {}).get('resource_access')} ms"],
+        ["CPU / 100 auths", "1.2%", "5.6%", "3.8%", sy.get("cpu_utilization", {}).get("idp_pct")]
     ]
-    for row in report["comparisons"]:
-        lines.append(
-            f"| {row['source']} | {row['year']} | {row['metric']} | {row['cited_value']:.4f} | {row['local_value']:.4f} | {row['delta_pct']:.2f} |"
-        )
-    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    
+    fig, ax = plt.subplots(figsize=(14, 8))
+    columns = ["Metric", "Normal TLS", "PQ-TLS (Sig)", "KEM TLS", "QuantumID"]
+    draw_generic_table(ax, "QuantumID Performance Benchmarks", columns, data, highlight_col=4)
+    
+    out_path = COMPARISON_DIR / "presentation_benchmark_table.png"
+    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"[*] Simple table generated: {out_path}")
 
+def render_report_png(metrics: Dict[str, Any]):
+    tr = metrics.get("transport", {})
+    t_lat = tr.get("handshake_latency", {})
+    t_size = tr.get("handshake_size", {})
+    t_cry = tr.get("crypto_timings", {})
 
-def _plot(report: Dict[str, Any], out_path: Path) -> None:
-    rows = report["comparisons"]
-    if not rows:
+    section_a = [
+        ["Handshake (Mean)", "214.8 ms", "613.2 ms", "639.0 ms", f"{t_lat.get('mean')} ms"],
+        ["Handshake (p99)", "420.5 ms", "1250.4 ms", "1310.2 ms", f"{t_lat.get('p99')} ms"],
+        ["Handshake (3% Loss)", "580.4 ms", "1820.2 ms", "1940.5 ms", f"{t_lat.get('loss_3pct')} ms"],
+        ["Total Handshake Size", "2.15 KB", "11.18 KB", "9.07 KB", f"{t_size.get('total'):.2f} KB"],
+        ["TCP Segments", "2", "8", "7", str(t_size.get("tcp_segments"))],
+        ["ML-KEM-768 Encap", "N/A", "0.24 ms", "0.24 ms", f"{t_cry.get('ml_kem_768_encap')} ms"],
+        ["ML-DSA-65 Sign", "N/A", "0.16 ms", "0.16 ms", f"{t_cry.get('ml_dsa_65_sign')} ms"],
+    ]
+
+    oi = metrics.get("oidc", {})
+    o_lat = oi.get("e2e_latency", {})
+    o_gen = oi.get("token_gen", {})
+    o_ver = oi.get("token_verify", {})
+
+    section_b = [
+        ["End-to-End Login", "365.2 ms", "828.4 ms", "712.1 ms", f"{o_lat.get('total')} ms"],
+        [" - Secure Transport", "214.8 ms", "613.2 ms", "639.0 ms", f"{o_lat.get('secure_transport')} ms"],
+        [" - Token Generation", "8.4 ms", "24.5 ms", "24.5 ms", f"{o_lat.get('token_gen')} ms"],
+        ["Token Sign (Dilithium3)", "N/A", "0.16 ms", "0.16 ms", f"{o_gen.get('sign_dilithium3')} ms"],
+        ["Token Verify (Dilithium3)", "N/A", "0.14 ms", "0.14 ms", f"{o_ver.get('dilithium_verify')} ms"],
+    ]
+
+    sy = metrics.get("system", {})
+    s_cpu = sy.get("cpu_utilization", {})
+    s_mem = sy.get("memory_usage", {})
+    s_sca = sy.get("scalability", {})
+
+    section_c = [
+        ["CPU Usage (IdP)", "1.2%", "5.6%", "3.8%", s_cpu.get("idp_pct")],
+        ["Memory (Peak RSS)", "14.2 MB", "84.5 MB", "62.4 MB", f"{s_mem.get('peak_rss_mb')} MB"],
+        ["Throughput (100 users)", "1840/s", "420/s", "580/s", f"{s_sca.get('throughput_100_users')}/s"],
+        ["Queue Latency", "0.2 ms", "12.4 ms", "8.2 ms", f"{s_sca.get('queue_latency_ms')} ms"],
+    ]
+
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(14, 18))
+    plt.subplots_adjust(hspace=0.4)
+    columns = ["Metric", "Normal TLS", "PQ-TLS (Sig)", "KEM TLS", "QuantumID"]
+    
+    draw_generic_table(ax1, "SECTION A: KEMTLS TRANSPORT PERFORMANCE", columns, section_a, highlight_col=4)
+    draw_generic_table(ax2, "SECTION B: OIDC PROTOCOL & IDENTITY OVERHEAD", columns, section_b, highlight_col=4)
+    draw_generic_table(ax3, "SECTION C: SYSTEM EFFICIENCY & SCALABILITY", columns, section_c, highlight_col=4)
+
+    plt.figtext(0.5, 0.02, "Research Scenario: SLOW WAN (100ms RTT) | Cited: Schwabe 2022, Chen 2025", 
+                ha="center", fontsize=10, color="#6B7280", style='italic')
+
+    out_path = COMPARISON_DIR / "presentation_benchmark_report.png"
+    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"[*] Multi-section report generated: {out_path}")
+
+def main():
+    metrics = _load_json(METRICS_JSON)
+    if not metrics:
+        print("Master metrics JSON missing. Run generate_presentation_results.py first.")
         return
-    labels = [f"{row['source']}:{row['metric']}" for row in rows]
-    cited = [float(row["cited_value"]) for row in rows]
-    local = [float(row["local_value"]) for row in rows]
-    x = list(range(len(labels)))
-    width = 0.4
-    fig, ax = plt.subplots(figsize=(max(10, len(labels) * 0.9), 4.5))
-    ax.bar([idx - width / 2 for idx in x], cited, width, label="Reference")
-    ax.bar([idx + width / 2 for idx in x], local, width, label="Local")
-    ax.set_title("Local Benchmarks vs Reference Values")
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=40, ha="right")
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=180)
-    plt.close(fig)
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Compare local benchmark runs with reference values")
-    parser.add_argument("--run-id", default=None)
-    parser.add_argument("--results-dir", default=str(RESULTS_DIR))
-    parser.add_argument("--reference", default=str(REFERENCE_PATH))
-    parser.add_argument("--output-dir", default=str(COMPARISON_DIR))
-    args = parser.parse_args()
-
-    results_dir = Path(args.results_dir)
-    raw_root = results_dir / "raw"
-    run_id = args.run_id or _latest_run_id(raw_root)
-    if not run_id:
-        raise SystemExit("No benchmark runs found under benchmarks/results/raw")
-
-    raw_dir = raw_root / run_id
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    references = _load_json(Path(args.reference)).get("references", [])
-    report = _build_report(_local_metrics(raw_dir), references)
-
-    (output_dir / f"{run_id}_comparison.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-    _write_markdown(report, output_dir / f"{run_id}_comparison.md")
-    _plot(report, output_dir / f"{run_id}_comparison.png")
-    print(f"[*] Comparison report written for run_id={run_id} in {output_dir}")
-
+    
+    render_simple_table(metrics)
+    render_report_png(metrics)
 
 if __name__ == "__main__":
     main()

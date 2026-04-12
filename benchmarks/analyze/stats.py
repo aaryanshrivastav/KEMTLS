@@ -1,82 +1,60 @@
 from __future__ import annotations
 
-import math
-import random
+import csv
+import json
 import statistics
-from typing import Dict, Iterable, List
+import argparse
+from pathlib import Path
+from typing import Dict, List, Any
 
-try:
-    from scipy.stats import bootstrap as scipy_bootstrap  # type: ignore
-except Exception:
-    scipy_bootstrap = None
-
-
-def percentile(values: List[float], p: float) -> float:
+def calculate_stats(values: List[float]) -> Dict[str, float]:
     if not values:
-        return 0.0
+        return {"p50": 0.0, "p95": 0.0, "p99": 0.0, "mean": 0.0}
+    
     ordered = sorted(values)
-    idx = min(len(ordered) - 1, max(0, int((len(ordered) - 1) * p)))
-    return float(ordered[idx])
-
-
-def bootstrap_ci(values: List[float], *, alpha: float = 0.05, iterations: int = 1000) -> Dict[str, float]:
-    if not values:
-        return {"low": 0.0, "high": 0.0}
-    if scipy_bootstrap is not None and len(values) > 1:
-        try:
-            result = scipy_bootstrap(
-                (values,),
-                statistic=statistics.mean,
-                confidence_level=1.0 - alpha,
-                n_resamples=iterations,
-                method="BCa",
-            )
-            return {
-                "low": float(result.confidence_interval.low),
-                "high": float(result.confidence_interval.high),
-            }
-        except Exception:
-            pass
-    means: List[float] = []
-    n = len(values)
-    for _ in range(iterations):
-        sample = [values[random.randint(0, n - 1)] for _ in range(n)]
-        means.append(statistics.mean(sample))
-    means.sort()
-    low_i = int((alpha / 2.0) * (iterations - 1))
-    high_i = int((1 - alpha / 2.0) * (iterations - 1))
-    return {"low": float(means[low_i]), "high": float(means[high_i])}
-
-
-def summarize(values: Iterable[float]) -> Dict[str, float]:
-    vals = [float(v) for v in values]
-    if not vals:
-        return {
-            "mean": 0.0,
-            "median": 0.0,
-            "min": 0.0,
-            "max": 0.0,
-            "stddev": 0.0,
-            "p95": 0.0,
-            "p99": 0.0,
-            "cov": 0.0,
-            "ci_low": 0.0,
-            "ci_high": 0.0,
-        }
-
-    mean_v = statistics.mean(vals)
-    std_v = statistics.pstdev(vals) if len(vals) > 1 else 0.0
-    ci = bootstrap_ci(vals)
-    cov = (std_v / mean_v) if mean_v != 0 else 0.0
     return {
-        "mean": float(mean_v),
-        "median": float(statistics.median(vals)),
-        "min": float(min(vals)),
-        "max": float(max(vals)),
-        "stddev": float(std_v),
-        "p95": percentile(vals, 0.95),
-        "p99": percentile(vals, 0.99),
-        "cov": float(cov),
-        "ci_low": ci["low"],
-        "ci_high": ci["high"],
+        "p50": statistics.median(values),
+        "p95": ordered[min(len(ordered) - 1, int((len(ordered) - 1) * 0.95))],
+        "p99": ordered[min(len(ordered) - 1, int((len(ordered) - 1) * 0.99))],
+        "mean": statistics.mean(values)
     }
+
+def process_handshake(csv_path: Path):
+    if not csv_path.exists():
+        return None
+    
+    data = []
+    with csv_path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            data.append(row)
+            
+    # Group by mode and RTT
+    groups = {}
+    for row in data:
+        key = (row["handshake_mode"], row["rtt_ms"])
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(float(row["latency_ms"]))
+        
+    results = {}
+    for key, values in groups.items():
+        results[f"{key[0]}_rtt{key[1]}"] = calculate_stats(values)
+    return results
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-id", required=True)
+    args = parser.parse_args()
+    
+    base_path = Path("benchmarks/results/raw") / args.run_id
+    
+    handshake_stats = process_handshake(base_path / "handshake.csv")
+    
+    if handshake_stats:
+        output_path = base_path / "stats_handshake.json"
+        output_path.write_text(json.dumps(handshake_stats, indent=2))
+        print(f"[*] Stats saved to {output_path}")
+
+if __name__ == "__main__":
+    main()

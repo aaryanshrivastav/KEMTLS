@@ -16,7 +16,6 @@ interface FlowStep {
   explanation: string;
   status: 'idle' | 'running' | 'done' | 'error';
   data?: Record<string, string>;
-  durationMs?: number;
 }
 
 interface LogEntry {
@@ -30,6 +29,14 @@ type RunMode = 'full' | 'step';
 
 const SOCKET_URL = 'http://localhost:5002';
 const BACKEND_STEP_IDS = ['hello', 'server', 'derive', 'finished', 'authorize', 'account_auth', 'consent', 'token_exchange', 'session_bind', 'resource_access', 'refresh_token'] as const;
+
+function stripTimingText(message: string): string {
+  return message
+    .replace(/\(\s*\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|second|seconds|min|mins|minute|minutes)\s*\)/gi, '')
+    .replace(/\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|second|seconds|min|mins|minute|minutes)\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
 
 /* ──────────────────────────────────────────
    Step definitions with explanations for click-and-resume
@@ -110,7 +117,7 @@ function makePlaceholderData(stepId: string): Record<string, string> {
     hello: { kem_pk_size: '1184 bytes', cipher_suite: 'ML-KEM-768 + ML-DSA-65', pkce: 'S256' },
     server: { ct_size: '1088 bytes', cert_alg: 'ML-DSA-65', cert_chain: '2 certs' },
     derive: { client_key: 'a1b2...f0e9 (32B)', server_key: 'c3d4...78ab (32B)', exporter: 'ZjRhY2Mx...OGM (32B)' },
-    finished: { handshake_mac: 'HMAC-SHA256 ✓', replay_nonce: '0x7a3f...e1c0', latency: '2.1 ms' },
+    finished: { handshake_mac: 'HMAC-SHA256 ✓', replay_nonce: '0x7a3f...e1c0', verification: 'complete' },
     authorize: { redirect_uri: 'https://accounts.google.com/o/oauth2/v2/auth', state: 'rng_state_439f', scope: 'openid profile email', pkce: 'S256' },
     account_auth: { provider: 'Google', method: 'session + MFA', account: 'user@gmail.com', status: 'authenticated' },
     consent: { permissions: 'name, email, profile picture', code: 'a8f3k2x9m1b7...', state_verified: 'true' },
@@ -138,7 +145,6 @@ export default function Index() {
   const [flowState, setFlowState] = useState<FlowState>('idle');
   const [steps, setSteps] = useState<FlowStep[]>(INITIAL_STEPS);
   const [logs, setLogs] = useState<LogEntry[]>(PLACEHOLDER_LOGS);
-  const [elapsed, setElapsed] = useState(0);
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalWidth, setTerminalWidth] = useState(380);
@@ -149,10 +155,10 @@ export default function Index() {
   const [currentStepIdx, setCurrentStepIdx] = useState(-1);
   const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval>>();
   const logBoxRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
+  const fullFlowAutoResumeRef = useRef(false);
   const fullFlowRunIdRef = useRef(0);
   const isDraggingRef = useRef(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -182,22 +188,14 @@ export default function Index() {
     if (logBoxRef.current) logBoxRef.current.scrollTop = logBoxRef.current.scrollHeight;
   }, [logs]);
 
-  // Timer for elapsed
-  useEffect(() => {
-    if (flowState === 'running') {
-      timerRef.current = setInterval(() => setElapsed(e => e + 100), 100);
-    } else {
-      clearInterval(timerRef.current);
-    }
-    return () => clearInterval(timerRef.current);
-  }, [flowState]);
-
   const addLog = useCallback((level: LogEntry['level'], msg: string) => {
-    setLogs(prev => [...prev, { ts: Date.now(), level, msg }]);
+    const sanitizedMessage = stripTimingText(msg);
+    setLogs(prev => [...prev, { ts: Date.now(), level, msg: sanitizedMessage }]);
   }, []);
 
   const resetUiState = useCallback(() => {
     dismissThreat();
+    fullFlowAutoResumeRef.current = false;
     setInvalidRefreshVisual(false);
     setScreenShake(false);
     setFlowState('idle');
@@ -206,7 +204,6 @@ export default function Index() {
     setSelectedStep(null);
     setSteps(INITIAL_STEPS);
     setLogs([]);
-    setElapsed(0);
     scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
   }, [dismissThreat]);
 
@@ -328,12 +325,12 @@ export default function Index() {
       }
       if (data.autoAdvance === false) {
         setRunMode('step');
+        fullFlowAutoResumeRef.current = false;
       } else if (data.autoAdvance === true) {
         setRunMode('full');
       }
       dismissThreat();
       setFlowState('running');
-      setElapsed(0);
       setLogs([]);
       setSelectedStep(null);
 
@@ -345,10 +342,10 @@ export default function Index() {
       if (data.startAtStep) {
         setSteps(prev => prev.map((s, i) => {
           if (i < startIdx) return { ...s, status: 'done' };
-          return { ...s, status: 'idle', data: undefined, durationMs: undefined };
+          return { ...s, status: 'idle', data: undefined };
         }));
       } else {
-        setSteps(INITIAL_STEPS.map(s => ({ ...s, status: 'idle', data: undefined, durationMs: undefined })));
+        setSteps(INITIAL_STEPS.map(s => ({ ...s, status: 'idle', data: undefined })));
       }
     });
 
@@ -379,7 +376,6 @@ export default function Index() {
             ...s,
             status: isRefreshInvalid ? 'error' : 'done',
             data: data.data,
-            durationMs: data.durationMs,
           };
         }
         return s;
@@ -407,6 +403,12 @@ export default function Index() {
 
     socket.on('step_flow_paused', (data: { nextStepId: string; runId?: string }) => {
       if (currentRunIdRef.current && data.runId && data.runId !== currentRunIdRef.current) return;
+
+      if (runMode === 'full' && fullFlowAutoResumeRef.current) {
+        socket.emit('continue_step_flow', { runId: currentRunIdRef.current });
+        return;
+      }
+
       const nextIdx = stepIndexById.current[data.nextStepId];
       if (nextIdx === undefined) return;
 
@@ -434,6 +436,7 @@ export default function Index() {
 
     socket.on('step_flow_complete', (data: { runId?: string }) => {
       if (currentRunIdRef.current && data.runId && data.runId !== currentRunIdRef.current) return;
+      fullFlowAutoResumeRef.current = false;
       setWaitingForClick(false);
       setFlowState('done');
       addLog('ok', '');
@@ -556,8 +559,13 @@ export default function Index() {
       const isTypingTarget = tag === 'input' || tag === 'textarea' || target?.isContentEditable;
       if (isTypingTarget) return;
 
-      if (runMode === 'step' && waitingForClick && flowState === 'paused') {
+      if (waitingForClick && flowState === 'paused') {
         event.preventDefault();
+        if (runMode === 'full') {
+          fullFlowAutoResumeRef.current = true;
+          socketRef.current?.emit('continue_step_flow', { runId: currentRunIdRef.current });
+          return;
+        }
         advanceStepFlow();
       }
     };
@@ -713,8 +721,6 @@ export default function Index() {
               {flowState === 'idle' ? 'READY' : flowState === 'running' ? 'RUNNING' : flowState === 'paused' ? 'PAUSED' : 'COMPLETE'}
             </span>
           </div>
-          <span style={{ color: 'var(--text-dim)' }}>|</span>
-          <span style={{ color: 'var(--text-mid)' }}>{(elapsed / 1000).toFixed(1)}s</span>
         </div>
 
         {/* Terminal toggle */}
@@ -766,7 +772,7 @@ export default function Index() {
         {/* ─── CENTER: Vertical Flow + Protocol Activity (inline) ─── */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Scrollable flow area */}
-          <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden">
+          <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overflow-x-visible">
             <VerticalFlowVisualizer
               steps={steps}
               selectedStep={selectedStep}
@@ -778,6 +784,8 @@ export default function Index() {
               activeThreat={activeThreat}
               onDismissThreat={dismissThreat}
               scrollContainerRef={scrollContainerRef}
+              popupSafeLeftPx={runMode === 'step' ? 360 : 24}
+              popupSafeRightPx={(terminalOpen ? terminalWidth : 0) + (runMode === 'step' && detailsOpen && activeStepObj && activeStepObj.status === 'done' && (flowState === 'paused' || flowState === 'done') ? 380 : 0)}
             />
           </div>
 
@@ -891,7 +899,7 @@ export default function Index() {
           </>
         )}
         <div className="flex-1" />
-        <span style={{ color: 'var(--text-dim)' }}>HelloWorld v1.0 │ {new Date().toLocaleTimeString()}</span>
+        <span style={{ color: 'var(--text-dim)' }}>HelloWorld v1.0</span>
       </footer>
     </div>
   );
@@ -901,7 +909,7 @@ export default function Index() {
    VERTICAL FLOW VISUALIZER
    Phases stacked vertically with BIGGER clickable nodes
    ══════════════════════════════════════════ */
-function VerticalFlowVisualizer({ steps, selectedStep, flowState, runMode, waitingForClick, currentStepIdx, onNodeClick, activeThreat, onDismissThreat, scrollContainerRef }: {
+function VerticalFlowVisualizer({ steps, selectedStep, flowState, runMode, waitingForClick, currentStepIdx, onNodeClick, activeThreat, onDismissThreat, scrollContainerRef, popupSafeLeftPx, popupSafeRightPx }: {
   steps: FlowStep[];
   selectedStep: string | null;
   flowState: FlowState;
@@ -912,7 +920,11 @@ function VerticalFlowVisualizer({ steps, selectedStep, flowState, runMode, waiti
   activeThreat: import('../components/ThreatPopup').ThreatInfo | null;
   onDismissThreat: () => void;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+  popupSafeLeftPx: number;
+  popupSafeRightPx: number;
 }) {
+  type TooltipSide = 'left' | 'right';
+  type TooltipPlacement = { x: number; y: number; side: TooltipSide };
   const stepIndexMap = useMemo(() => {
     const map: Record<string, number> = {};
     INITIAL_STEPS.forEach((s, i) => {
@@ -921,7 +933,67 @@ function VerticalFlowVisualizer({ steps, selectedStep, flowState, runMode, waiti
     return map;
   }, []);
   const phaseRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const stepAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [tooltipPlacementByStep, setTooltipPlacementByStep] = useState<Record<string, TooltipPlacement>>({});
   const lastScrolledPhaseRef = useRef(-1);
+
+  const recalcActiveTooltipPlacement = useCallback(() => {
+    const activeStepId = activeThreat?.stepId;
+    if (!activeStepId) return;
+
+    const anchor = stepAnchorRefs.current[activeStepId];
+    if (!anchor) return;
+
+    const rect = anchor.getBoundingClientRect();
+    const tooltipWidth = Math.min(320, Math.max(220, window.innerWidth - 40));
+    const gutter = 16;
+    const gap = 16;
+
+    const safeLeft = Math.max(gutter, popupSafeLeftPx + gutter);
+    const safeRight = Math.max(safeLeft + tooltipWidth, window.innerWidth - popupSafeRightPx - gutter);
+    const maxLeft = Math.max(safeLeft, safeRight - tooltipWidth);
+
+    const anchorCenterX = rect.left + rect.width / 2;
+    const anchorCenterY = rect.top + rect.height / 2;
+    const preferredRightX = anchorCenterX + gap;
+    const preferredLeftX = anchorCenterX - tooltipWidth - gap;
+
+    const rightFits = preferredRightX >= safeLeft && preferredRightX <= maxLeft;
+    const leftFits = preferredLeftX >= safeLeft && preferredLeftX <= maxLeft;
+
+    let side: TooltipSide = 'right';
+    let x = preferredRightX;
+
+    if (rightFits) {
+      side = 'right';
+      x = preferredRightX;
+    } else if (leftFits) {
+      side = 'left';
+      x = preferredLeftX;
+    } else {
+      const clampedRight = Math.min(maxLeft, Math.max(safeLeft, preferredRightX));
+      const clampedLeft = Math.min(maxLeft, Math.max(safeLeft, preferredLeftX));
+      const rightDistance = Math.abs(clampedRight - preferredRightX);
+      const leftDistance = Math.abs(clampedLeft - preferredLeftX);
+      if (leftDistance < rightDistance) {
+        side = 'left';
+        x = clampedLeft;
+      } else {
+        side = 'right';
+        x = clampedRight;
+      }
+    }
+
+    const y = anchorCenterY;
+
+    setTooltipPlacementByStep(prev => {
+      const current = prev[activeStepId];
+      if (current && current.side === side && current.x === x && current.y === y) {
+        return prev;
+      }
+      return { ...prev, [activeStepId]: { x, y, side } };
+    });
+  }, [activeThreat, popupSafeLeftPx, popupSafeRightPx]);
 
   // Auto-scroll when a phase completes AND its threat is dismissed
   // i.e. when currentStepIdx reaches the first step of the NEXT phase
@@ -951,6 +1023,22 @@ function VerticalFlowVisualizer({ steps, selectedStep, flowState, runMode, waiti
       lastScrolledPhaseRef.current = -1;
     }
   }, [flowState]);
+
+  useEffect(() => {
+    recalcActiveTooltipPlacement();
+
+    const onResize = () => recalcActiveTooltipPlacement();
+    window.addEventListener('resize', onResize);
+
+    const scroller = scrollContainerRef.current;
+    const onScroll = () => recalcActiveTooltipPlacement();
+    scroller?.addEventListener('scroll', onScroll);
+
+    return () => {
+      window.removeEventListener('resize', onResize);
+      scroller?.removeEventListener('scroll', onScroll);
+    };
+  }, [recalcActiveTooltipPlacement, scrollContainerRef, currentStepIdx]);
 
   return (
     <div className="flex flex-col items-center py-8 px-8 gap-0 min-h-full justify-center">
@@ -984,10 +1072,10 @@ function VerticalFlowVisualizer({ steps, selectedStep, flowState, runMode, waiti
             All {INITIAL_STEPS.length} protocol steps executed successfully
           </div>
           <div className="flex gap-6 mt-4 justify-center">
-            <StatChip label="HANDSHAKE" value="2.1ms" color="var(--cyan)" />
+            <StatChip label="HANDSHAKE" value="VERIFIED" color="var(--cyan)" />
             <StatChip label="TOKEN SIZE" value="7.8KB" color="var(--magenta)" />
             <StatChip label="SIG SIZE" value="3293B" color="var(--violet)" />
-            <StatChip label="TOTAL" value={`${(steps.reduce((a, s) => a + (s.durationMs || 0), 0) / 1000).toFixed(1)}s`} color="var(--lime)" />
+            <StatChip label="SESSION" value="BOUND" color="var(--lime)" />
           </div>
         </div>
       )}
@@ -1027,7 +1115,13 @@ function VerticalFlowVisualizer({ steps, selectedStep, flowState, runMode, waiti
                 const connectorTop = nodeSize / 2;
 
                 return (
-                  <div key={step.id} className="flex items-start relative">
+                  <div
+                    key={step.id}
+                    className="flex items-start relative"
+                    ref={el => {
+                      stepAnchorRefs.current[step.id] = el;
+                    }}
+                  >
                     {/* Node */}
                     <button
                       onClick={() => onNodeClick(step.id)}
@@ -1126,31 +1220,22 @@ function VerticalFlowVisualizer({ steps, selectedStep, flowState, runMode, waiti
                         {step.detail.length > 30 ? step.detail.slice(0, 30) + '…' : step.detail}
                       </div>
 
-                      {/* Duration badge */}
-                      {step.durationMs && (
-                        <div className="font-code mt-0.5" style={{ fontSize: '10px', color: 'var(--lime)' }}>
-                          {step.durationMs}ms
-                        </div>
-                      )}
                     </button>
 
                     {/* Threat tooltip — Left for all except the first ('hello') node */}
                     {hasThreat && activeThreat && (() => {
-                      // Keep tooltip in view: prefer right side for earlier nodes and
-                      // left side only when we are far enough into the flow.
-                      const showOnLeft = globalIdx >= 3;
+                      const placement = tooltipPlacementByStep[step.id];
+                      const showOnLeft = (placement?.side || 'right') === 'left';
                       const arrowColor = activeThreat.severity === 'critical' ? 'rgba(212,92,110,0.5)' : activeThreat.severity === 'high' ? 'rgba(212,140,92,0.5)' : 'rgba(212,165,92,0.5)';
 
                       return (
                         <div style={{
-                          position: 'absolute',
-                          top: `${connectorTop}px`,
-                          ...(showOnLeft
-                            ? { right: '100%', marginRight: '16px' }
-                            : { left: '100%', marginLeft: '16px' }),
+                          position: 'fixed',
+                          top: `${placement?.y ?? 0}px`,
+                          left: `${placement?.x ?? 0}px`,
                           transform: 'translateY(-50%)',
                           width: 'min(320px, calc(100vw - 40px))',
-                          zIndex: 50,
+                          zIndex: 600,
                           animation: showOnLeft ? 'slideInLeft 0.3s ease' : 'slideInRight 0.3s ease',
                           pointerEvents: 'auto',
                         }}>
@@ -1442,6 +1527,13 @@ function InlineThreatTooltip({ threat, onClose }: { threat: import('../component
    Shown on the right when paused at a step
    ══════════════════════════════════════════ */
 function StepExplanation({ step, threat }: { step: FlowStep; threat?: { title: string; description: string; mitigation: string; severity: string } }) {
+  const sanitizedDataEntries = Object.entries(step.data ?? {}).filter(([key, val]) => {
+    const keyLower = key.toLowerCase();
+    const valueLower = String(val).toLowerCase();
+    const timingSignals = ['time', 'timestamp', 'duration', 'latency', ' ms', ' sec', 'second', 'minute'];
+    return !timingSignals.some(signal => keyLower.includes(signal) || valueLower.includes(signal));
+  });
+
   return (
     <div className="p-5 flex flex-col gap-4">
       {/* Step header */}
@@ -1476,13 +1568,13 @@ function StepExplanation({ step, threat }: { step: FlowStep; threat?: { title: s
       </div>
 
       {/* Data inspector */}
-      {step.data && (
+      {sanitizedDataEntries.length > 0 && (
         <div>
           <div className="font-display text-[10px] tracking-[0.2em] mb-2" style={{ color: 'var(--cyan)' }}>
             📊 DATA CAPTURED
           </div>
           <div className="flex flex-col gap-2">
-            {Object.entries(step.data).map(([key, val]) => (
+            {sanitizedDataEntries.map(([key, val]) => (
               <div key={key} className="rounded-lg p-3 transition-all duration-200" style={{
                 background: 'rgba(0,229,255,0.04)',
                 border: '1px solid rgba(0,229,255,0.08)',

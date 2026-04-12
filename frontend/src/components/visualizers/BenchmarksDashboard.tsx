@@ -6,9 +6,9 @@ export function BenchmarksDashboard() {
       
       <div className="w-full space-y-8">
         <BenchmarkItem 
-          title="Handshake Latency"
-          baseline={{ label: "3.2ms", value: 3.2, max: 4.0 }}
-          pdk={{ label: "2.1ms", value: 2.1, max: 4.0 }}
+          title="Handshake Effort"
+          baseline={{ label: "Level 3.2", value: 3.2, max: 4.0 }}
+          pdk={{ label: "Level 2.1", value: 2.1, max: 4.0 }}
           improvement="34%"
           improvementLabel="Reduction"
         />

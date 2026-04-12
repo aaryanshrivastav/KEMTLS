@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Clock, HardDrive, Loader2 } from "lucide-react";
+import { HardDrive, Loader2 } from "lucide-react";
 
 interface BenchmarkCardProps {
   operation: string;
@@ -30,13 +30,6 @@ export const BenchmarkCard = ({ operation, time, size, comparison, loading = fal
       ) : (
         <>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-primary" />
-              <span className="font-mono text-sm neon-text">
-                {time || '-- ms'}
-              </span>
-            </div>
-            
             {size && (
               <div className="flex items-center gap-2">
                 <HardDrive className="w-4 h-4 text-secondary" />

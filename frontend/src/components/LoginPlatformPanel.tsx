@@ -23,9 +23,9 @@ interface LoginPlatformPanelProps {
 }
 
 const ACCOUNTS = [
-  { name: 'Uzair Khalid', email: 'uzair@gmail.com', initial: 'U', gradient: 'linear-gradient(135deg, #4285F4, #34A853)' },
-  { name: 'Samagra Singh', email: 'samagra@gmail.com', initial: 'S', gradient: 'linear-gradient(135deg, var(--cyan), var(--magenta))' },
-  { name: 'Aaryan Gupta', email: 'aaryan@gmail.com', initial: 'A', gradient: 'linear-gradient(135deg, #EA4335, #FBBC05)' },
+  { name: 'Uzair Shaikh', email: 'uzair@gmail.com', initial: 'U', gradient: 'linear-gradient(135deg, #4285F4, #34A853)' },
+  { name: 'Samagra', email: 'samagra@gmail.com', initial: 'S', gradient: 'linear-gradient(135deg, var(--cyan), var(--magenta))' },
+  { name: 'Aaryan', email: 'aaryan@gmail.com', initial: 'A', gradient: 'linear-gradient(135deg, #EA4335, #FBBC05)' },
 ];
 
 /*

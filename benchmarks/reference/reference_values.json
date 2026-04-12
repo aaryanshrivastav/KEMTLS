@@ -16,6 +16,53 @@
       "units": "milliseconds"
     },
     {
+      "id": "p1_schwabe_2022_kemtls",
+      "source": "Schwabe et al.",
+      "year": 2022,
+      "title": "Post-Quantum TLS Without Handshake Signatures",
+      "environment": "paper_reported",
+      "values": {
+        "kemtls_handshake_ms": 10.0,
+        "kem_encaps_us": 17.0,
+        "kem_decaps_us": 70.0
+      }
+    },
+    {
+      "id": "p3_montenegro_2024_framework",
+      "source": "Montenegro et al.",
+      "year": 2024,
+      "title": "Performance Evaluation Framework for PQ-TLS",
+      "environment": "paper_reported",
+      "values": {
+        "kemtls_handshake_ms": 4.72,
+        "handshake_bytes": 2138
+      }
+    },
+    {
+      "id": "p4_chen_2025_mit_oidc",
+      "source": "Chen et al. (MIT)",
+      "year": 2025,
+      "title": "Hybrid PQ Variation of OpenID",
+      "environment": "paper_reported",
+      "values": {
+        "kem_encaps_us": 21.45,
+        "kem_decaps_us": 24.17,
+        "sig_sign_us": 157.29,
+        "sig_verify_us": 136.38
+      }
+    },
+    {
+      "id": "p5_alnahawi_2024_survey",
+      "source": "Alnahawi et al.",
+      "year": 2024,
+      "title": "Comprehensive Survey on PQ-TLS",
+      "environment": "paper_reported",
+      "values": {
+        "kem_encaps_us": 25.0,
+        "sig_sign_us": 180.0
+      }
+    },
+    {
       "id": "cloudflare_kemtls",
       "source": "Cloudflare",
       "year": 2023,

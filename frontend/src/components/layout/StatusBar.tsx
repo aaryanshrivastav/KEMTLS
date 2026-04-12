@@ -1,5 +1,3 @@
-import { useEffect, useState } from "react";
-
 interface StatusBarProps {
   connectionStatus: 'connected' | 'disconnected' | 'connecting';
   currentMode: string;
@@ -7,13 +5,6 @@ interface StatusBarProps {
 }
 
 export function StatusBar({ connectionStatus, currentMode, sessionId }: StatusBarProps) {
-  const [time, setTime] = useState(new Date().toLocaleTimeString());
-
-  useEffect(() => {
-    const timer = setInterval(() => setTime(new Date().toLocaleTimeString()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   return (
     <footer className="h-[40px] flex items-center gap-6 px-6 bg-bg-secondary border-t border-glass-border font-mono text-sm z-50">
       <div className="flex items-center gap-2">
@@ -41,10 +32,6 @@ export function StatusBar({ connectionStatus, currentMode, sessionId }: StatusBa
       )}
 
       <div className="flex-1" />
-
-      <div className="text-text-tertiary">
-        {time}
-      </div>
     </footer>
   );
 }

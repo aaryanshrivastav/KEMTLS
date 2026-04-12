@@ -44,11 +44,19 @@ def _run_script(script_name: str, *, config_path: Path, results_dir: Path, run_i
 
 
 def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-id", default=None)
+    parser.add_argument("--environment-profile", default=None)
+    parser.add_argument("--repeat", type=int, default=None)
+    parser.add_argument("--warmup", type=int, default=None)
+    args = parser.parse_args()
+
     config = _load_config()
-    run_id = uuid.uuid4().hex[:8]
-    environment_profile = str(config.get("environment_profile", "wsl2_loopback"))
-    repeat = int(config.get("repeat", 1000))
-    warmup = int(config.get("warmup", 50))
+    run_id = args.run_id or uuid.uuid4().hex[:8]
+    environment_profile = args.environment_profile or str(config.get("environment_profile", "wsl2_loopback"))
+    repeat = args.repeat if args.repeat is not None else int(config.get("repeat", 1000))
+    warmup = args.warmup if args.warmup is not None else int(config.get("warmup", 50))
     results_dir = ROOT_DIR / str(config.get("results_dir", "benchmarks/results"))
     raw_run_dir = results_dir / "raw" / run_id
     raw_run_dir.mkdir(parents=True, exist_ok=True)
@@ -107,20 +115,10 @@ def main() -> None:
             warmup=warmup,
         )
         scripts_run.append("run_oidc.py")
-        _run_script(
-            "run_artifacts.py",
-            config_path=CONFIG_PATH,
-            results_dir=results_dir,
-            run_id=run_id,
-            environment_profile=environment_profile,
-            repeat=repeat,
-            warmup=warmup,
-        )
-        scripts_run.append("run_artifacts.py")
 
-    if "load" in suites:
+    if "load" in suites or "system" in suites:
         _run_script(
-            "run_load.py",
+            "run_system.py",
             config_path=CONFIG_PATH,
             results_dir=results_dir,
             run_id=run_id,
@@ -128,7 +126,7 @@ def main() -> None:
             repeat=repeat,
             warmup=warmup,
         )
-        scripts_run.append("run_load.py")
+        scripts_run.append("run_system.py")
 
     if "rust_compare" in suites:
         _run_script(

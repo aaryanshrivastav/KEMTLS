@@ -104,6 +104,15 @@ export const THREATS: ThreatInfo[] = [
     severity: 'medium',
     icon: '🛡️',
   },
+  {
+    id: 'refresh-replay',
+    stepId: 'refresh_token',
+    title: 'REFRESH TOKEN REPLAY',
+    description: 'Attacker reuses a stolen or previously used refresh token to mint new access tokens.',
+    mitigation: 'Refresh token rotation with reuse detection invalidates stale tokens and revokes the family on replay attempts.',
+    severity: 'high',
+    icon: '♻️',
+  },
 ];
 
 /* ═══════════════════════════════════════════
